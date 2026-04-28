@@ -9,9 +9,15 @@ const MOVE_SPEED = 6;
 const JUMP_IMPULSE = 12;
 const SCENE_GRAVITY = -20;
 const GROUND_CAST = 0.75; // raycast distance from capsule center
-const KILL_Y = -15;
-const SPAWN_X = 0;
+const CAMERA_HALF_HEIGHT = 15;
+const TRUNK_HEIGHT = 30;
+const TRUNK_CENTER_Y = 12;
+const TRUNK_BOTTOM_Y = TRUNK_CENTER_Y - TRUNK_HEIGHT * 0.5;
+const KILL_Y = TRUNK_BOTTOM_Y - 1;
+const PLAYER_BODY_HEIGHT = 1.2;
+const SPAWN_X = PLAYER_BODY_HEIGHT;
 const SPAWN_Y = 3;
+const CAMERA_MIN_Y = TRUNK_CENTER_Y - TRUNK_HEIGHT * 0.5 + CAMERA_HALF_HEIGHT;
 
 const EYE_MAX_YAW = 0.25; // radians (~14°)
 const EYE_MAX_PITCH = 0.18; // radians (~10°)
@@ -21,6 +27,11 @@ const BRANCH_BREAK_T = 2.0; // seconds standing before break
 const BRANCH_WARN_T = 1.0; // seconds before warning visual starts
 const BRANCH_COLOR = new BABYLON.Color3(0.4, 0.29, 0.23);
 const BRANCH_DANGER = new BABYLON.Color3(0.85, 0.18, 0.1);
+const FALL_SLICE_MAX_LIFETIME_MS = 4000;
+const FALL_SLICE_COMPLETE_Y = KILL_Y - 8;
+const FALL_SLICE_UP_MIN = 4.2;
+const FALL_SLICE_UP_MAX = 6.2;
+const RESPAWN_GRACE_T = 0.25;
 
 // ─── Bark Material ───────────────────────────────────────────────────
 
@@ -372,7 +383,7 @@ class PlayerController {
     this.mesh = BABYLON.MeshBuilder.CreateCapsule(
       "player",
       {
-        height: 1.2,
+        height: 1.5 * PLAYER_BODY_HEIGHT,
         radius: 0.35,
       },
       scene,
@@ -380,23 +391,27 @@ class PlayerController {
     this.mesh.isVisible = false;
     this.mesh.position.set(SPAWN_X, SPAWN_Y, 0);
 
+    this._createPhysicsBody();
+
+    this._loadModel();
+  }
+
+  _createPhysicsBody() {
     const shape = new BABYLON.PhysicsShapeCapsule(
       new BABYLON.Vector3(0, 0.25, 0),
       new BABYLON.Vector3(0, -0.25, 0),
       0.35,
-      scene,
+      this.scene,
     );
     this.body = new BABYLON.PhysicsBody(
       this.mesh,
       BABYLON.PhysicsMotionType.DYNAMIC,
       false,
-      scene,
+      this.scene,
     );
     this.body.shape = shape;
     this.body.setMassProperties({ mass: 1, inertia: BABYLON.Vector3.Zero() });
     this.body.setLinearDamping(0.1);
-
-    this._loadModel();
   }
 
   async _loadModel() {
@@ -584,9 +599,6 @@ class PlayerController {
     } else if (this.grounded) {
       this._setFace("default");
     }
-
-    // Respawn
-    if (p.y < KILL_Y) this.respawn();
   }
 
   _setFace(name) {
@@ -599,6 +611,29 @@ class PlayerController {
     } else {
       this.faceMat.diffuseTexture = tex;
     }
+  }
+
+  setVisualEnabled(enabled) {
+    if (this.root) this.root.setEnabled(enabled);
+    if (!enabled) {
+      for (const anim of Object.values(this.anims)) anim.stop();
+      this.currentAnim = "";
+    }
+  }
+
+  teleportTo(x, y, z = 0) {
+    this.mesh.position.set(x, y, z);
+    this.mesh.rotation.setAll(0);
+    if (this.mesh.rotationQuaternion) {
+      this.mesh.rotationQuaternion = BABYLON.Quaternion.Identity();
+    }
+    this.mesh.computeWorldMatrix(true);
+  }
+
+  resetPhysicsAt(x, y, z = 0) {
+    this.teleportTo(x, y, z);
+    if (this.body) this.body.dispose();
+    this._createPhysicsBody();
   }
 
   /** Apply eye rotation AFTER animation evaluation so we override bone poses. */
@@ -643,9 +678,17 @@ class PlayerController {
   }
 
   respawn() {
-    this.mesh.position.set(SPAWN_X, SPAWN_Y, 0);
-    this.body.setLinearVelocity(BABYLON.Vector3.Zero());
-    this.body.setAngularVelocity(BABYLON.Vector3.Zero());
+    this.resetPhysicsAt(SPAWN_X, SPAWN_Y, 0);
+    this.grounded = false;
+    this.standingBody = null;
+    this.wasGrounded = true;
+    this.jumpBuffer = 0;
+    this.jumpWindup = 0;
+    this.coyoteTime = 0;
+    this.branchDanger = 0;
+    this.setVisualEnabled(true);
+    this._playAnim("idle");
+    this._setFace("default");
   }
 }
 
@@ -668,6 +711,12 @@ class Game {
     this.branches = [];
     this.input = new InputManager();
     this.player = null;
+    this.sliceBurst = null;
+    this.activeDeathBurst = null;
+    this.respawnPending = false;
+    this.respawnGraceTimer = 0;
+    this.deathCameraX = 0;
+    this.deathCameraY = 0;
 
     this._init().then(() => {
       this.engine.runRenderLoop(() => {
@@ -687,7 +736,7 @@ class Game {
 
   _updateOrtho() {
     const aspect = this.engine.getAspectRatio(this.camera);
-    const halfH = 15;
+    const halfH = CAMERA_HALF_HEIGHT;
     const halfW = halfH * aspect;
     this.camera.orthoTop = halfH;
     this.camera.orthoBottom = -halfH;
@@ -725,10 +774,10 @@ class Game {
     // Camera — side view, orthographic
     this.camera = new BABYLON.FreeCamera(
       "cam",
-      new BABYLON.Vector3(0, 10, -18),
+      new BABYLON.Vector3(0, CAMERA_MIN_Y, -18),
       scene,
     );
-    this.camera.setTarget(new BABYLON.Vector3(0, 10, 0));
+    this.camera.setTarget(new BABYLON.Vector3(0, CAMERA_MIN_Y, 0));
     this.camera.minZ = 0.1;
     this.camera.mode = BABYLON.Camera.ORTHOGRAPHIC_CAMERA;
     this._updateOrtho();
@@ -767,10 +816,10 @@ class Game {
     // Tree trunk — sits at the tree plane Z, half embedded
     const trunk = BABYLON.MeshBuilder.CreateCylinder(
       "trunk",
-      { height: 30, diameter: 1.6, tessellation: 16 },
+      { height: TRUNK_HEIGHT, diameter: 1.6, tessellation: 16 },
       scene,
     );
-    trunk.position.set(0, 12, 3);
+    trunk.position.set(0, TRUNK_CENTER_Y, 3);
     trunk.material = this.barkMat;
 
     // Branches
@@ -778,6 +827,10 @@ class Game {
 
     // Player
     this.player = new PlayerController(scene, this.input);
+    if (typeof window.AppleSliceBurstEffect === "function") {
+      this.sliceBurst = new window.AppleSliceBurstEffect(scene);
+      void this.sliceBurst.preload();
+    }
 
     // Eye update runs AFTER animation evaluation to override bone poses
     scene.onAfterAnimationsObservable.add(() => {
@@ -797,12 +850,22 @@ class Game {
     }
   }
 
+  _finishRespawnAfterDeath() {
+    if (!this.respawnPending) return;
+
+    this.activeDeathBurst = null;
+    this.player.respawn();
+    this._buildBranches();
+    this.respawnPending = false;
+    this.respawnGraceTimer = RESPAWN_GRACE_T;
+  }
+
   _buildBgPlane(tex) {
     if (this.bgPlane) this.bgPlane.dispose();
     if (this.bgMat) this.bgMat.dispose();
 
     // Ortho: visible size = ortho bounds
-    const halfH = 15;
+    const halfH = CAMERA_HALF_HEIGHT;
     const aspect = this.engine.getAspectRatio(this.camera);
     const halfW = halfH * aspect;
     const size = Math.max(halfW * 2, halfH * 2) * 1.05;
@@ -819,7 +882,7 @@ class Game {
     const bgMat = new BABYLON.StandardMaterial("bgMat", this.scene);
     bgMat.diffuseTexture = tex;
     bgMat.emissiveTexture = tex;
-    bgMat.emissiveColor = new BABYLON.Color3(0.7, 0.7, 0.7);
+    bgMat.emissiveColor = new BABYLON.Color3(1.2, 1.2, 1.2);
     bgMat.disableLighting = true;
     bgMat.backFaceCulling = false;
     bgPlane.material = bgMat;
@@ -857,8 +920,9 @@ class Game {
     tex.vScale = vTiles;
     treeMat.diffuseTexture = tex;
     treeMat.opacityTexture = tex;
+    treeMat.emissiveTexture = tex;
     treeMat.specularColor = BABYLON.Color3.Black();
-    treeMat.emissiveColor = new BABYLON.Color3(0.3, 0.3, 0.3);
+    treeMat.emissiveColor = new BABYLON.Color3(0.6, 0.6, 0.6);
     treeMat.backFaceCulling = false;
     treeMat.transparencyMode = BABYLON.Material.MATERIAL_ALPHABLEND;
     treePlane.material = treeMat;
@@ -869,7 +933,11 @@ class Game {
   _update(dt) {
     if (!this.player?.ready) return;
 
-    this.player.update(dt);
+    this.respawnGraceTimer = Math.max(0, this.respawnGraceTimer - dt);
+
+    if (!this.respawnPending) {
+      this.player.update(dt);
+    }
 
     // Branch contact & break logic
     this.player.branchDanger = 0;
@@ -886,23 +954,66 @@ class Game {
       if (!b.update(dt)) this.branches.splice(i, 1);
     }
 
-    // Respawn → rebuild all branches
-    if (this.player.mesh.position.y < KILL_Y) {
-      this.player.respawn();
-      this._buildBranches();
+    // Fall fail-state: launch slices upward from below screen, then respawn.
+    if (
+      !this.respawnPending &&
+      this.respawnGraceTimer <= 0 &&
+      this.player.mesh.position.y < KILL_Y
+    ) {
+      this.respawnPending = true;
+      this.deathCameraX = this.camera.position.x;
+      this.deathCameraY = this.camera.position.y;
+
+      const px = this.player.mesh.position.x;
+      const burstCenter = new BABYLON.Vector3(px, KILL_Y - 6, 0);
+
+      if (this.activeDeathBurst) {
+        this.activeDeathBurst.dispose();
+        this.activeDeathBurst = null;
+      }
+
+      this.player.setVisualEnabled(false);
+      this.player.resetPhysicsAt(px, KILL_Y - 30, 0);
+
+      if (this.sliceBurst) {
+        this.activeDeathBurst = this.sliceBurst.burst({
+          center: burstCenter,
+          lifetimeMs: FALL_SLICE_MAX_LIFETIME_MS,
+          completeBelowY: FALL_SLICE_COMPLETE_Y,
+          onComplete: () => this._finishRespawnAfterDeath(),
+          radialMin: 0.6,
+          radialMax: 1.7,
+          upMin: FALL_SLICE_UP_MIN,
+          upMax: FALL_SLICE_UP_MAX,
+          planarDir: new BABYLON.Vector3(Math.random() - 0.5, 0, 0),
+          planarJitter: 0.9,
+        });
+      } else {
+        this._finishRespawnAfterDeath();
+      }
     }
 
     // Camera smooth follow — slide only, no rotation
-    const pp = this.player.mesh.position;
-    const tx = pp.x * 0.4;
-    const ty = pp.y + 3;
-    this.camera.position.x += (tx - this.camera.position.x) * 0.08;
-    this.camera.position.y += (ty - this.camera.position.y) * 0.08;
+    const followX = this.respawnPending
+      ? this.deathCameraX
+      : this.player.mesh.position.x * 0.4;
+    const followY = this.respawnPending
+      ? this.deathCameraY
+      : this.player.mesh.position.y + 3;
+    this.camera.position.x += (followX - this.camera.position.x) * 0.08;
+    this.camera.position.y += (followY - this.camera.position.y) * 0.08;
+    this.camera.position.y = Math.max(CAMERA_MIN_Y, this.camera.position.y);
   }
 }
 
 // ─── Bootstrap ───────────────────────────────────────────────────────
 
-window.addEventListener("DOMContentLoaded", () => {
+function startGame() {
   new Game(document.getElementById("renderCanvas"));
-});
+}
+
+if (document.readyState === "loading") {
+  window.addEventListener("DOMContentLoaded", startGame);
+} else {
+  startGame();
+}

@@ -9,3 +9,8 @@ npx serve . -l 3000
 ```
 
 Open http://localhost:3000
+
+## Demos
+
+- 2.5D branch platformer (original): http://localhost:3000
+- 3D rolling platformer (new): http://localhost:3000/?demo=3d

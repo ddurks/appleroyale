@@ -41,6 +41,13 @@
     <script src="https://cdn.babylonjs.com/babylon.js"></script>
     <script src="https://cdn.babylonjs.com/loaders/babylonjs.loaders.min.js"></script>
     <script src="https://cdn.babylonjs.com/havok/HavokPhysics_umd.js"></script>
-    <script src="game.js"></script>
+    <script src="sliceBurst.js"></script>
+    <script>
+      const params = new URLSearchParams(window.location.search);
+      const demo = params.get("demo");
+      const gameScript = document.createElement("script");
+      gameScript.src = demo === "3d" ? "game2.js" : "game.js";
+      document.body.appendChild(gameScript);
+    </script>
   </body>
 </html>
