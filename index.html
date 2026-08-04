@@ -32,21 +32,39 @@
         pointer-events: none;
         user-select: none;
       }
+      #banner {
+        position: absolute;
+        top: 36%;
+        left: 0;
+        right: 0;
+        text-align: center;
+        color: #fff;
+        font: 700 34px/1.2 system-ui, monospace;
+        text-shadow: 0 2px 10px rgba(0, 0, 0, 0.7);
+        pointer-events: none;
+        user-select: none;
+        display: none;
+      }
     </style>
   </head>
   <body>
     <canvas id="renderCanvas"></canvas>
-    <div id="hud">A/D or ←/→ move &nbsp; SPACE jump</div>
+    <div id="hud">A/D move &nbsp; SPACE jump &nbsp; F shoot</div>
+    <div id="banner"></div>
 
     <script src="https://cdn.babylonjs.com/babylon.js"></script>
     <script src="https://cdn.babylonjs.com/loaders/babylonjs.loaders.min.js"></script>
     <script src="https://cdn.babylonjs.com/havok/HavokPhysics_umd.js"></script>
     <script src="sliceBurst.js"></script>
     <script>
+      // Default: multiplayer royale. Old demos stay reachable:
+      //   ?demo=classic → single-player branch platformer (game.js)
+      //   ?demo=3d      → 3D rolling sphere demo (game2.js)
       const params = new URLSearchParams(window.location.search);
       const demo = params.get("demo");
       const gameScript = document.createElement("script");
-      gameScript.src = demo === "3d" ? "game2.js" : "game.js";
+      gameScript.src =
+        demo === "3d" ? "game2.js" : demo === "classic" ? "game.js" : "royale.js";
       document.body.appendChild(gameScript);
     </script>
   </body>
