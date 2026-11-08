@@ -1533,6 +1533,7 @@ class Game {
       if (!show) continue;
       const name = this._nameOf(v.index);
       if (el.textContent !== name) el.textContent = name;
+      el.classList.toggle("me", v.index === this.humanIdx);
       const p = BABYLON.Vector3.Project(new V3(v.x, v.y - APPLE_FOOT - 0.1, 0), BABYLON.Matrix.IdentityReadOnly, vpm, vp);
       const y = Math.min(p.y, canvas.clientHeight - 24); // keep it on screen (the lobby ground is at the very bottom)
       el.style.transform = `translate(${p.x.toFixed(1)}px, ${y.toFixed(1)}px) translate(-50%, 0)`;
