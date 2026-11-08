@@ -8,13 +8,15 @@
 (function () {
   "use strict";
 
-  // localhost → a local dev server; anywhere else → the live world.
+  // Served from this machine or the local network (a phone testing against
+  // your Mac) → the dev server on that host; anywhere else → the live world.
   // ?server=ws://host:port overrides.
   function serverUrl() {
     const override = new URLSearchParams(location.search).get("server");
     if (override) return override;
-    const local = /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname);
-    return local ? "ws://localhost:7781" : "wss://apple-world.drawvid.com";
+    const h = location.hostname;
+    const local = /^(localhost|127\.|\[::1\]|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)|\.local$/.test(h);
+    return local ? `ws://${h}:7781` : "wss://apple-world.drawvid.com";
   }
 
   // ?lag=100 delays every message 100 ms each way (testing on localhost).
