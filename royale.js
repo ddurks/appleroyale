@@ -663,6 +663,20 @@ class Game {
     if (this.round) this.round.fillAhead = this._fillAhead();
   }
 
+  // On touch screens the lobby's ground would sit under the buttons, hiding
+  // you: in the lobby the view drops by the button bar's height (plus a
+  // little), easing back to normal while everyone is carried up the tree.
+  _lobbyDrop(phase, transT) {
+    if (phase !== "lobby" && phase !== "transition") return 0;
+    const bar = document.getElementById("touch").offsetHeight; // 0 when hidden
+    if (!bar) return 0;
+    const canvas = this.engine.getRenderingCanvas();
+    const perPx = (this.camera.orthoTop - this.camera.orthoBottom) / canvas.clientHeight;
+    const drop = (bar + 16) * perPx;
+    if (phase === "lobby") return drop;
+    return drop * (1 - transT * transT * (3 - 2 * transT));
+  }
+
   // Build branches far enough ahead to fill this screen's view (taller on
   // portrait phones). The layout is the same; it's only revealed further up.
   _fillAhead() {
@@ -899,7 +913,7 @@ class Game {
     }
 
     const r = this.round;
-    this.camera.position.y = this.prevCamY + (r.cameraY - this.prevCamY) * alpha;
+    this.camera.position.y = this.prevCamY + (r.cameraY - this.prevCamY) * alpha - this._lobbyDrop(r.phase, r.transT);
     this.ceilingY = r.scrollY + VIEW_HEIGHT; // the core's ceiling (+ the apple's top)
     for (const v of this.views) v.render(dt, alpha);
     this._syncBranches(alpha);
@@ -1197,12 +1211,12 @@ class Game {
     const lerp = (x, y) => x + (y - x) * f;
     const phase = s1.ph;
     let camY = lerp(s0.sy, s1.sy) + CAMERA_HALF_HEIGHT;
+    const t = lerp(s0.tt, s1.tt);
     if (phase === "lobby") camY = C.LOBBY_CAM_Y;
     else if (phase === "transition") {
-      const t = lerp(s0.tt, s1.tt);
       camY = C.LOBBY_CAM_Y + (C.GAME_CAM_Y - C.LOBBY_CAM_Y) * t * t * (3 - 2 * t);
     }
-    this.camera.position.y = camY;
+    this.camera.position.y = camY - this._lobbyDrop(phase, t);
     this.ceilingY = m.scrollY + VIEW_HEIGHT;
 
     const alpha = o.acc / DT;
