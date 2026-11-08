@@ -1396,7 +1396,7 @@ class Game {
         engine, cam, size,
         (data) => {
           const btn = document.querySelector(`#touch [data-code="${code}"]`);
-          if (btn) btn.innerHTML = `<img alt="" src="${data}">`;
+          if (btn) btn.innerHTML = `<span class="leaf" style="background-image: url(${data})"></span>`;
           cam.dispose();
           mesh.dispose();
           shoot();
