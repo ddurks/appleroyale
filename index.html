@@ -180,17 +180,18 @@
         -webkit-touch-callout: none;
       }
       /* The arrows are your apple's own leaves (rendered by royale.js);
-         a held one grows a little. */
+         a held one grows a little more. */
       #touch button .leaf {
         display: block;
         width: 100%;
         height: 100%;
         background: center / contain no-repeat;
+        transform: scale(1.2); /* a bit bigger than the button; its margin is transparent */
         transition: transform 80ms ease-out;
         pointer-events: none;
       }
       #touch button.down .leaf {
-        transform: scale(1.1);
+        transform: scale(1.32); /* 1.1× when held */
       }
       /* ?debug: the sizes the browser is really using (phone layout checks). */
       #debug {
