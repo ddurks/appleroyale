@@ -167,6 +167,7 @@
         pointer-events: none;
       }
       #touch button {
+        position: relative; /* drawn over the stem */
         flex: 1;
         min-width: 0; /* else Safari keeps each button as wide as its leaf image (431px) */
         height: var(--pad-h);
@@ -188,6 +189,15 @@
         background: center / contain no-repeat;
         transform: scale(1.2); /* a bit bigger than the button; its margin is transparent */
         transition: transform 80ms ease-out;
+        pointer-events: none;
+      }
+      /* The stem between the leaves, from the bottom of the screen (placed by
+         royale.js at the leaves' scale; its picture stretches lengthwise). */
+      #stem {
+        display: none;
+        position: absolute;
+        bottom: 0;
+        background: center / 100% 100% no-repeat;
         pointer-events: none;
       }
       #touch button.down .leaf {
@@ -212,13 +222,13 @@
         overflow: visible;
       }
       #action canvas {
-        /* Taller than the button (rising above it), so a full stretch or
-           squash never crops. */
+        /* 1.2× the button, like the leaves, and taller still (rising above
+           it), so a full stretch or squash never crops. */
         position: absolute;
-        left: 0;
+        left: -10%;
         bottom: 0;
-        width: 100%;
-        height: 135%;
+        width: 120%;
+        height: 162%;
         pointer-events: none; /* presses go to the button */
       }
       @media (hover: none) and (pointer: coarse) {
@@ -238,7 +248,8 @@
     </div>
     <div id="banner"></div>
     <div id="touch">
-      <!-- Filled with your apple's leaves once they're rendered (royale.js). -->
+      <!-- Filled with your apple's leaves and stem once they're rendered (royale.js). -->
+      <div id="stem"></div>
       <button data-code="ArrowLeft" aria-label="Move left"></button>
       <button data-code="ArrowRight" aria-label="Move right"></button>
       <button id="action" aria-label="Jump / pound">

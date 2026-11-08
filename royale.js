@@ -89,6 +89,7 @@ const BOT_TIERS = [
 ];
 const DIFFICULTY_KEY = "appleRoyale.difficulty";
 const NAME_KEY = "appleRoyale.name";
+const LEAF_SCALE = 1.2; // the leaf buttons' drawn size vs their button (index.html .leaf)
 // Bot names, by seat (so every online client agrees).
 const BOT_NAMES = [
   "Bad Apple", "Granny Smith", "Sir Isaac", "Core Blimey", "Big Apple",
@@ -632,6 +633,7 @@ class Game {
     window.addEventListener("resize", () => {
       this.engine.resize();
       this._updateOrtho();
+      this._layoutStem();
     });
   }
 
@@ -1326,11 +1328,13 @@ class Game {
     });
     engine.runRenderLoop(() => scene.render());
 
-    // The ◀ ▶ buttons are the apple's own left and right leaves (no stem),
-    // rendered once into images. They're photographed in a fixed pose (idle
-    // clip paused on its first frame, no squash), so every load gets the
-    // same pictures; the idle carries on afterwards.
-    const leaves = inst.rootNodes[0].getChildMeshes(false).find((m) => /leaves/.test(m.name));
+    // The ◀ ▶ buttons are the apple's own left and right leaves, with its
+    // stem standing between them, rendered once into images. They're
+    // photographed in a fixed pose (idle clip paused on its first frame, no
+    // squash), so every load gets the same pictures; the idle carries on after.
+    const parts = inst.rootNodes[0].getChildMeshes(false);
+    const leaves = parts.find((m) => /leaves/.test(m.name));
+    const stem = parts.find((m) => /stem/.test(m.name));
     if (leaves) {
       this.leafShots = true;
       if (idle) {
@@ -1341,7 +1345,7 @@ class Game {
       const obs = scene.onAfterRenderObservable.add(() => {
         if (++frames < 3) return; // the frozen pose is drawn (bones updated)
         scene.onAfterRenderObservable.remove(obs);
-        this._renderLeafButtons(engine, scene, leaves, () => {
+        this._renderTouchArt(engine, scene, leaves, stem, () => {
           this.leafShots = false;
           if (idle) idle.play(true);
         });
@@ -1349,53 +1353,66 @@ class Game {
     }
   }
 
-  // Render each leaf on its own into a transparent image: a copy of the
-  // leaves mesh keeping only the triangles on that side of the stem, framed
-  // by a tight orthographic camera. One at a time (Babylon takes one
-  // screenshot at a time).
-  _renderLeafButtons(engine, scene, leaves, done) {
+  // Render each leaf on its own into a transparent image (a copy of the
+  // leaves mesh keeping only the triangles on that side of the stem), then
+  // the stem, each framed by a tight orthographic camera. One at a time
+  // (Babylon takes one screenshot at a time).
+  _renderTouchArt(engine, scene, leaves, stem, done) {
     leaves.refreshBoundingInfo(true);
     const mid = leaves.getBoundingInfo().boundingBox.centerWorld.x;
-    // Positions as drawn: skinned into the current (frozen) pose.
-    const pos = leaves.getPositionData(true, true);
-    const idx = leaves.getIndices();
-    const toWorld = leaves.getWorldMatrix();
-    const world = (i) => {
-      const w = new V3();
-      V3.TransformCoordinatesFromFloatsToRef(pos[3 * i], pos[3 * i + 1], pos[3 * i + 2], toWorld, w);
-      return w;
+    // A mesh's triangles in world space, as drawn: skinned into the current
+    // (frozen) pose.
+    const triangles = (mesh) => {
+      const pos = mesh.getPositionData(true, true);
+      const idx = mesh.getIndices();
+      const toWorld = mesh.getWorldMatrix();
+      const world = (i) => {
+        const w = new V3();
+        V3.TransformCoordinatesFromFloatsToRef(pos[3 * i], pos[3 * i + 1], pos[3 * i + 2], toWorld, w);
+        return w;
+      };
+      const out = [];
+      for (let t = 0; t < idx.length; t += 3) out.push({ i: [idx[t], idx[t + 1], idx[t + 2]], p: [world(idx[t]), world(idx[t + 1]), world(idx[t + 2])] });
+      return out;
     };
-    // A mesh of just one side's triangles, and the bounds of what it draws.
-    const leaf = (left) => {
-      const keep = [];
+    const bounds = (tris) => {
       const min = new V3(Infinity, Infinity, Infinity);
       const max = new V3(-Infinity, -Infinity, -Infinity);
-      for (let t = 0; t < idx.length; t += 3) {
-        const p = [world(idx[t]), world(idx[t + 1]), world(idx[t + 2])];
-        if ((p[0].x + p[1].x + p[2].x) / 3 < mid !== left) continue;
-        keep.push(idx[t], idx[t + 1], idx[t + 2]);
-        for (const q of p) {
-          min.minimizeInPlace(q);
-          max.maximizeInPlace(q);
-        }
+      for (const t of tris) for (const q of t.p) {
+        min.minimizeInPlace(q);
+        max.maximizeInPlace(q);
       }
+      return { min, max };
+    };
+    const leafTris = triangles(leaves);
+    // A mesh of just one side's triangles, and the bounds of what it draws.
+    const leaf = (left) => {
+      const tris = leafTris.filter((t) => (t.p[0].x + t.p[1].x + t.p[2].x) / 3 < mid === left);
       const m = leaves.clone(left ? "leafL" : "leafR", leaves.parent);
       m.makeGeometryUnique();
-      m.setIndices(keep);
+      m.setIndices(tris.flatMap((t) => t.i));
       m.setEnabled(false); // only drawn into its screenshot
-      return { m, min, max };
+      const { min, max } = bounds(tris);
+      return { key: left ? "ArrowLeft" : "ArrowRight", m, min, max, pad: 0.12 * (max.x - min.x), own: true };
     };
-    const shots = [["ArrowLeft", leaf(true)], ["ArrowRight", leaf(false)]];
+    const shots = [leaf(true), leaf(false)];
+    if (stem) {
+      const { min, max } = bounds(triangles(stem));
+      shots.push({ key: "stem", m: stem, min, max, pad: 0.01 });
+    }
     let tries = 0;
     const shoot = () => {
-      if (!shots.length) return done();
-      const [code, { m: mesh, min, max }] = shots[0];
-      const pad = 0.12 * (max.x - min.x);
+      if (!shots.length) {
+        this._layoutStem();
+        return done();
+      }
+      const shot = shots[0];
+      const { m: mesh, min, max, pad } = shot;
       const cx = (min.x + max.x) / 2;
       const cy = (min.y + max.y) / 2;
       const hw = (max.x - min.x) / 2 + pad;
       const hh = (max.y - min.y) / 2 + pad;
-      const cam = new BABYLON.FreeCamera("leafCam", new V3(cx, cy, -18), scene);
+      const cam = new BABYLON.FreeCamera("artCam", new V3(cx, cy, -18), scene);
       cam.setTarget(new V3(cx, cy, 0));
       cam.mode = BABYLON.Camera.ORTHOGRAPHIC_CAMERA;
       cam.orthoLeft = -hw;
@@ -1403,7 +1420,7 @@ class Game {
       cam.orthoTop = hh;
       cam.orthoBottom = -hh;
       const h = 256;
-      const size = { width: Math.round((h * hw) / hh), height: h };
+      const size = { width: Math.max(8, Math.round((h * hw) / hh)), height: h };
       mesh.setEnabled(true);
       BABYLON.Tools.CreateScreenshotUsingRenderTarget(
         engine, cam, size,
@@ -1411,13 +1428,19 @@ class Game {
           cam.dispose();
           // Now and then a shot comes back empty (a few KB of transparent
           // PNG; a leaf is ~50 KB): take it again.
-          if (data.length < 10000 && ++tries < 4) {
+          if (data.length < (shot.key === "stem" ? 1000 : 10000) && ++tries < 4) {
             setTimeout(shoot, 100);
             return;
           }
-          const btn = document.querySelector(`#touch [data-code="${code}"]`);
-          if (btn) btn.innerHTML = `<span class="leaf" style="background-image: url(${data})"></span>`;
-          mesh.dispose();
+          if (shot.key === "stem") {
+            this.stemArt = { url: data, width: 2 * hw, top: max.y + pad };
+          } else {
+            const btn = document.querySelector(`#touch [data-code="${shot.key}"]`);
+            if (btn) btn.innerHTML = `<span class="leaf" style="background-image: url(${data})"></span>`;
+            // For the stem: how big a leaf's picture is, in world units.
+            this.leafArt = { width: 2 * hw, height: 2 * hh, cy };
+          }
+          if (shot.own) mesh.dispose();
           shots.shift();
           tries = 0;
           shoot();
@@ -1429,6 +1452,31 @@ class Game {
       );
     };
     shoot();
+  }
+
+  // The stem stands between the two leaf buttons, from the bottom of the
+  // screen up to a little above the leaves, at the leaves' scale — as it
+  // sits on an apple's head.
+  _layoutStem() {
+    const el = document.getElementById("stem");
+    const left = document.querySelector('#touch [data-code="ArrowLeft"]');
+    const right = document.querySelector('#touch [data-code="ArrowRight"]');
+    if (!el || !left || !right || !this.stemArt || !this.leafArt) return;
+    const bar = document.getElementById("touch").getBoundingClientRect();
+    const L = left.getBoundingClientRect();
+    const R = right.getBoundingClientRect();
+    if (!L.width) return; // touch bar hidden
+    // A leaf's picture is fitted (contain) into its button, then scaled.
+    const aspect = this.leafArt.width / this.leafArt.height;
+    const shown = Math.min(L.width, L.height * aspect) * LEAF_SCALE;
+    const px = shown / this.leafArt.width; // screen px per world unit
+    const leafMidY = (L.top + L.bottom) / 2 - bar.top;
+    const width = this.stemArt.width * px;
+    el.style.width = `${width}px`;
+    el.style.left = `${(L.right + R.left) / 2 - bar.left - width / 2}px`;
+    el.style.top = `${leafMidY - (this.stemArt.top - this.leafArt.cy) * px}px`;
+    el.style.backgroundImage = `url(${this.stemArt.url})`;
+    el.style.display = "block";
   }
 
   _setPlayerName(raw) {
