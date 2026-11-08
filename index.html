@@ -251,6 +251,35 @@
     </div>
 
     <script>
+      // Fit the page to exactly what's visible. On iOS Safari the layout
+      // viewport can be bigger than the screen (under the floating toolbar)
+      // or panned/zoomed, cutting off edges; the visual viewport is what you
+      // actually see, so the page is sized and placed on it.
+      (function () {
+        const vv = window.visualViewport;
+        if (!vv) return;
+        const fit = () => {
+          const s = document.body.style;
+          s.left = vv.offsetLeft + "px";
+          s.top = vv.offsetTop + "px";
+          s.width = vv.width + "px";
+          s.height = vv.height + "px";
+          s.right = s.bottom = "auto";
+          window.dispatchEvent(new Event("resize")); // the game re-fits its canvas
+        };
+        let queued = false;
+        const later = () => {
+          if (queued) return;
+          queued = true;
+          requestAnimationFrame(() => {
+            queued = false;
+            fit();
+          });
+        };
+        vv.addEventListener("resize", later);
+        vv.addEventListener("scroll", later);
+        fit();
+      })();
       // ?debug: show viewport / zoom / element edges, for phone layout checks.
       if (new URLSearchParams(location.search).has("debug")) {
         const box = document.createElement("div");

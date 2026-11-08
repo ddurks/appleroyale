@@ -1374,9 +1374,10 @@ class Game {
       return { m, min, max };
     };
     const shots = [["ArrowLeft", leaf(true)], ["ArrowRight", leaf(false)]];
+    let tries = 0;
     const shoot = () => {
       if (!shots.length) return;
-      const [code, { m: mesh, min, max }] = shots.shift();
+      const [code, { m: mesh, min, max }] = shots[0];
       const pad = 0.12 * (max.x - min.x);
       const cx = (min.x + max.x) / 2;
       const cy = (min.y + max.y) / 2;
@@ -1395,10 +1396,18 @@ class Game {
       BABYLON.Tools.CreateScreenshotUsingRenderTarget(
         engine, cam, size,
         (data) => {
+          cam.dispose();
+          // Now and then a shot comes back empty (a few KB of transparent
+          // PNG; a leaf is ~50 KB): take it again.
+          if (data.length < 10000 && ++tries < 4) {
+            setTimeout(shoot, 100);
+            return;
+          }
           const btn = document.querySelector(`#touch [data-code="${code}"]`);
           if (btn) btn.innerHTML = `<span class="leaf" style="background-image: url(${data})"></span>`;
-          cam.dispose();
           mesh.dispose();
+          shots.shift();
+          tries = 0;
           shoot();
         },
         "image/png", 4, true, undefined, false, false, false, 1,
