@@ -740,19 +740,6 @@ class Game {
       for (const v of this.views) v.updateEyes(dt);
     });
 
-    // The view's top is a ceiling (core.js). On screens taller than the
-    // shared view (portrait phones), dim the space above it.
-    const shade = BABYLON.MeshBuilder.CreatePlane("aboveCeiling", { width: 200, height: 100 }, scene);
-    const shadeMat = new BABYLON.StandardMaterial("aboveCeilingMat", scene);
-    shadeMat.diffuseColor = shadeMat.specularColor = BABYLON.Color3.Black();
-    shadeMat.disableLighting = true;
-    shadeMat.alpha = 0.45;
-    shade.material = shadeMat;
-    shade.position.z = 1; // in front of the branches and tree, behind the apples
-    shade.isPickable = false;
-    shade.setEnabled(false);
-    this.ceilingShade = shade;
-
     this._startLobby();
   }
 
@@ -924,9 +911,6 @@ class Game {
       this.goTimer -= dt;
       this.setBanner(this.goTimer > 0 ? "GO!" : "");
     }
-    const shade = r.phase === "countdown" || r.phase === "playing" || r.phase === "over";
-    this.ceilingShade.setEnabled(shade);
-    if (shade) this.ceilingShade.position.y = this.ceilingY + 50;
 
     this._updateShake(dt);
     this._updateBgScroll();
@@ -1232,9 +1216,6 @@ class Game {
       this.goTimer -= dt;
       this.setBanner(this.goTimer > 0 ? "GO!" : "");
     }
-    const shade = m.phase === "countdown" || m.phase === "playing" || m.phase === "over";
-    this.ceilingShade.setEnabled(shade);
-    if (shade) this.ceilingShade.position.y = this.ceilingY + 50;
 
     this._updateShake(dt);
     this._updateBgScroll();
