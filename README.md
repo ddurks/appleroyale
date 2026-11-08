@@ -38,8 +38,28 @@ goes on — stay in frame to stay alive. The top of the screen is a ceiling
 - Faces react: grimace when stomped, yell while pounding, frown near the
   bottom of the screen, "o" while rising, grin near the top.
 - The rules live in `core.js` (no graphics; fixed 1/60 s steps), shared by
-  the game, the bot lab and, later, the multiplayer server. `royale.js`
-  feeds it inputs and draws it.
+  the game, the bot lab and the multiplayer server. `royale.js` feeds it
+  inputs and draws it.
 - Bot difficulty: **Easy / Normal / Hard / Expert**, picked in the lobby
   (keys **1–4**, or tap the labels; remembered). The bots run the trained
   policy in `bots.js` (see `bots/TIERS.md`).
+
+## Online
+
+Offline vs bots is the default. In the lobby, **Play online** (or **O**)
+joins a lobby on the server: other players walk around with you, and the
+round starts when it's full, 15 s after the first player arrives, or when a
+lone player hits **Start now** (**G**). Empty seats get bots (Hard). After
+each round you're dropped into the next lobby; **Play offline** goes back.
+
+- Server: the `appleroyale` world in `../drawvidverse` (port 7781;
+  `npm run dev:appleroyale` there). On localhost the page connects to
+  `ws://localhost:7781`, elsewhere to `wss://apple-world.drawvid.com`;
+  `?server=ws://host:port` overrides, `?lag=100` adds 100 ms each way.
+- `net.js` speaks the protocol; `royale.js` mirrors the server's round in a
+  core `Round`, predicts your apple with the core and draws the others
+  100 ms behind, blended between snapshots.
+- After changing `core.js` (or the bot), run
+  `../drawvidverse/tools/scripts/sync-appleroyale.sh` so the server plays
+  by the same rules; its tests fail until you do. A page whose rules differ
+  from the server's is told to reload.

@@ -1,6 +1,6 @@
 # Apple Royale multiplayer: plan
 
-Status: agreed (2026-11-08). Phase 1 done; phase 2 next. This replaces the August plan, which predates
+Status: agreed (2026-11-08). Phases 1–4 done; phase 5 (deploy) next. This replaces the August plan, which predates
 the bot lab. Nothing below is built yet.
 
 Goal: **simple, elegant, robust** online rounds. Up to 10 humans per round, with bots
@@ -69,7 +69,7 @@ the bot lab and by the server.
 This is the biggest step. It is also pure refactoring with no visible change, and
 everything after it gets simpler because of it.
 
-### 2. Server: an `appleroyale` world in drawvidverse
+### 2. Server: an `appleroyale` world in drawvidverse — DONE
 
 - **Engine** at `worldserver/src/games/appleroyale/engine.ts` (`IGameLogic`). It holds
   `matches: Map<id, Match>`, and each Match wraps one core round. This is the same
@@ -114,7 +114,7 @@ everything after it gets simpler because of it.
   - A disconnect hands the apple to a bot.
   - Garbage or flooding input is ignored.
 
-### 3. Online client: show the server's round (no prediction yet)
+### 3. Online client: show the server's round — DONE
 
 - **`net.js`:** a small WebSocket client. It connects, sends `auth`/`join`/`q`, sends
   one input per tick and buffers snapshots.
@@ -131,7 +131,7 @@ everything after it gets simpler because of it.
 - At this stage your own apple lags by your ping, which is fine on localhost and
   sluggish over the internet. Phase 4 removes that.
 
-### 4. Prediction for your own apple
+### 4. Prediction for your own apple — DONE
 
 - **Prediction:** the client steps **your** apple through the core immediately on each
   input, and keeps the inputs the server hasn't acknowledged yet.

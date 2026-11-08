@@ -612,6 +612,28 @@
       return ev;
     }
 
+    // Online, a client doesn't run the round: it mirrors the server's. Bring
+    // this round's phase, scroll and branches in line with a server snapshot
+    // ({ phase, scrollY, scrollSpeed, roundTime, countdown, transT, winner }),
+    // making the same structural changes the server made on the way, so
+    // branches (and their ids) match. The caller sets the apples.
+    mirror(s) {
+      if (this.phase === "lobby" && s.phase !== "lobby") this.beginTransition();
+      if (this.phase === "transition" && s.phase !== "transition") this._finishTransition([]);
+      this.phase = s.phase;
+      this.scrollY = s.scrollY;
+      this.scrollSpeed = s.scrollSpeed;
+      this.killLine = this.scrollY - C.KILL_GRACE;
+      this.roundTime = s.roundTime;
+      this.countdown = s.countdown;
+      this.transT = s.transT;
+      this.winner = s.winner;
+      if (this.phase === "playing" || this.phase === "over") {
+        this._fill();
+        this._cull();
+      }
+    }
+
     _setPhase(phase, ev) {
       this.phase = phase;
       ev.push({ type: "phase", phase });

@@ -40,6 +40,11 @@ const BG_BOTTOM_Y = -8; // bottom edge of the world-space tree background
 const BG_TOP_Y = 170; // tree background extends this high (covers the whole climb)
 const GO_BANNER_TIME = 0.6; // "GO!" stays up this long after the countdown
 
+// Online (net.js): other apples are drawn this many steps behind the newest
+// snapshot (100 ms: two snapshot gaps), so there's always one to blend toward.
+const INTERP_STEPS = 6;
+const CORRECTION_DECAY = 12; // 1/s: how fast a prediction correction is eased out
+
 // Bottom edge of both canopy layers, in world units above BG_BOTTOM_Y: one big
 // cartoon arc (lowest at the trunk, curving up toward the screen edges) whose
 // outline is a row of round scallops. Never below 0, so the leaf texture's
@@ -252,6 +257,9 @@ class AppleView {
 
     this.mesh = new BABYLON.TransformNode("apple" + index, this.scene);
     this.mesh.position.set(a.x, a.y, 0);
+    // Online: where prediction drew you minus where the server put you,
+    // eased out so a correction never snaps.
+    this.errX = this.errY = 0;
   }
 
   // This apple's state in the core.
@@ -373,7 +381,10 @@ class AppleView {
     const a = this.core;
     if (!a.alive) return;
     const lerp = (p, c) => p + (c - p) * alpha;
-    this.mesh.position.set(lerp(this.prevX, a.x), lerp(this.prevY, a.y), 0);
+    const ease = Math.exp(-CORRECTION_DECAY * dt);
+    this.errX *= ease;
+    this.errY *= ease;
+    this.mesh.position.set(lerp(this.prevX, a.x) + this.errX, lerp(this.prevY, a.y) + this.errY, 0);
 
     if (this.indicator) {
       this.indicator.position.y = INDICATOR_Y + Math.sin(this.game.t * 4) * 0.18;
@@ -500,6 +511,34 @@ function lobbyWanderer() {
   };
 }
 
+// Online: copy a snapshot apple ([x, y, vx, vy, squish, flags, facing]) onto
+// a core apple, blended from p (if given) by f.
+function setFromSnapshot(a, q, p = q, f = 1) {
+  const lerp = (i) => p[i] + (q[i] - p[i]) * f;
+  const flags = (f < 0.5 ? p : q)[5];
+  a.x = lerp(0);
+  a.y = lerp(1);
+  a.vx = lerp(2);
+  a.vy = lerp(3);
+  a.squish = lerp(4);
+  a.alive = !!(flags & 1);
+  a.grounded = !!(flags & 2);
+  a.charging = !!(flags & 4);
+  a.pounding = !!(flags & 8);
+  a.facing = q[6];
+  a.bounceVx = 0;
+  a.jumpWindup = 0;
+}
+
+// Online: the server's full state of our apple (branches by id).
+function applyFullState(a, st, round) {
+  const byId = (id) => (id === null ? null : round.branches.find((b) => b.id === id) || null);
+  for (const k in st) {
+    if (k === "standingBranch" || k === "passBranch") a[k] = byId(st[k]);
+    else a[k] = st[k];
+  }
+}
+
 // ─── Game ────────────────────────────────────────────────────────────
 
 class Game {
@@ -530,17 +569,23 @@ class Game {
       const d = localStorage.getItem(DIFFICULTY_KEY);
       if (d !== null && BOT_TIERS[+d]) this.difficulty = +d;
     } catch (e) {}
+    this.online = null; // online state while connected (see _goOnline)
     window.addEventListener("keydown", (e) => {
       const m = /^Digit([1-4])$/.exec(e.code);
       if (m) this._setDifficulty(+m[1] - 1);
+      if (e.code === "KeyO") this._toggleOnline();
+      if (e.code === "KeyG") this._startNow();
     });
     // Touch/click labels: their own element (the canvas is the action button).
     this.diffEl = document.getElementById("difficulty");
     if (this.diffEl) {
-      this.diffEl.innerHTML = BOT_TIERS.map((t, i) => `<span data-tier="${i}">${t.name}</span>`).join("");
-      for (const el of this.diffEl.querySelectorAll("[data-tier]")) {
-        el.addEventListener("click", () => this._setDifficulty(+el.dataset.tier));
-      }
+      this.diffEl.addEventListener("click", (e) => {
+        const el = e.target.closest("[data-tier], [data-act]");
+        if (!el) return;
+        if (el.dataset.tier) this._setDifficulty(+el.dataset.tier);
+        else if (el.dataset.act === "online") this._toggleOnline();
+        else if (el.dataset.act === "go") this._startNow();
+      });
     }
 
     window.royale = this; // handy for debugging in the console
@@ -560,7 +605,7 @@ class Game {
   }
 
   _setDifficulty(i) {
-    if (this.state !== "lobby" || !BOT_TIERS[i]) return;
+    if (this.online || this.state !== "lobby" || !BOT_TIERS[i]) return;
     this.difficulty = i;
     try {
       localStorage.setItem(DIFFICULTY_KEY, String(i));
@@ -818,6 +863,10 @@ class Game {
     this.camera.position.x -= this.shakeOff.x;
     this.camera.position.y -= this.shakeOff.y;
     this.shakeOff.x = this.shakeOff.y = 0;
+    if (this.online) {
+      this._updateOnline(dt);
+      return;
+    }
 
     // Step the core in fixed steps; draw in between.
     this.acc = Math.min(this.acc + dt, 0.25);
@@ -839,7 +888,7 @@ class Game {
     this._syncBranches(alpha);
     this._updateCameraX(dt);
 
-    if (r.phase === "countdown") this.setBanner(String(Math.ceil(r.countdown)));
+    if (r.phase === "countdown") this.setBanner(String(Math.max(1, Math.ceil(r.countdown))));
     else if (this.goTimer > 0) {
       this.goTimer -= dt;
       this.setBanner(this.goTimer > 0 ? "GO!" : "");
@@ -933,6 +982,277 @@ class Game {
     return v.isHuman ? "You" : "Bot " + v.index;
   }
 
+  // ── Online (net.js) ──────────────────────────────────────────────
+  // The server runs the round; we mirror it in a core Round (same branches,
+  // same phases), predict our own apple with the core, and draw everyone
+  // else INTERP_STEPS behind the newest snapshot, blended between two.
+
+  _toggleOnline() {
+    if (this.online) this._goOffline();
+    else if (this.state === "lobby") this._goOnline();
+  }
+
+  _startNow() {
+    if (this.online && this.online.mirror && this.state === "lobby") this.online.net.startNow();
+  }
+
+  _goOnline() {
+    let name = "Apple";
+    try {
+      name = localStorage.getItem("appleRoyale.name") || name;
+    } catch (e) {}
+    this.online = {
+      net: null,
+      mirror: null, // the core Round mirroring our match
+      rules: APPLE_CORE.rulesDigest(),
+      snaps: [], // recent snapshots, oldest first
+      renderK: 0, // the (fractional) server step others are drawn at
+      events: [], // not yet shown: [id, step, type, ...]
+      lastEvent: 0,
+      pending: [], // our inputs the server hasn't applied yet
+      seq: 0,
+      humans: 0,
+      acc: 0,
+    };
+    this.online.net = new AppleNet(name, {
+      onHello: (rules) => {
+        if (rules !== this.online.rules) this._goOffline("This page is out of date — reload it to play online.");
+      },
+      onSnapshot: (s) => this._onSnapshot(s),
+      onClose: (reason) => this._goOffline(`Offline: ${reason}.`),
+    });
+    this.setBanner("Connecting…");
+  }
+
+  _goOffline(message) {
+    const o = this.online;
+    if (!o) return;
+    this.online = null;
+    o.net.close();
+    this.input.consumeRestart(); // a press from online doesn't restart offline
+    this.humanIdx = Math.floor(NUM_APPLES / 2);
+    this._startLobby();
+    if (message) this.setBanner(message);
+  }
+
+  // A fresh match (or our first): a mirror round in its lobby, lobby scenery.
+  _newMirror(s) {
+    const o = this.online;
+    this._disposeLobby();
+    for (const v of this.views) v.dispose();
+    for (const bv of this.branchViews.values()) bv.dispose();
+    this.views = [];
+    this.branchViews.clear();
+    o.mirror = new Round({ seed: s.seed, fillAhead: this._fillAhead() });
+    o.mirror.startLobby();
+    o.snaps = [];
+    o.events = [];
+    o.pending = [];
+    o.renderK = s.k - INTERP_STEPS;
+    this.round = o.mirror;
+    this.humanIdx = s.you;
+    this.state = "lobby";
+    this._buildLobby();
+    this.camera.position.set(0, C.LOBBY_CAM_Y, -18);
+    this.prevCamY = C.LOBBY_CAM_Y;
+    this.setBanner("");
+  }
+
+  _onSnapshot(s) {
+    const o = this.online;
+    if (!o || s.k === undefined) return; // not in a match yet
+    if (!o.mirror || s.seed !== o.mirror.seed) this._newMirror(s);
+    const m = o.mirror;
+    // New seats (humans arriving, bots at the start) join while it's a lobby.
+    while (m.apples.length < s.a.length && m.phase === "lobby") {
+      const a = m.addApple(s.a[m.apples.length][0]);
+      setFromSnapshot(a, s.a[a.index]);
+      const v = new AppleView(this, a.index, a.index === s.you);
+      v.attachModel(this.appleContainer);
+      this.views.push(v);
+    }
+    const phase = m.phase;
+    m.mirror({ phase: s.ph, scrollY: s.sy, scrollSpeed: s.ss, roundTime: s.rt, countdown: s.cd, transT: s.tt, winner: s.w });
+    if (m.phase !== phase) this._onOnlinePhase(m.phase);
+
+    o.snaps.push(s);
+    if (o.snaps.length > 40) o.snaps.shift();
+    o.humans = s.n.filter((n) => n).length;
+    o.lobbyLeft = s.lt;
+    o.names = s.n;
+    for (const e of s.ev) if (e[0] > o.lastEvent) o.events.push(e);
+    if (s.ev.length) o.lastEvent = s.ev[s.ev.length - 1][0];
+
+    // Reconcile: take the server's state of our apple at the last input it
+    // applied, then replay the inputs it hasn't seen yet.
+    o.pending = o.pending.filter((p) => p.s > s.ack);
+    const me = m.apples[s.you];
+    if (me && s.me && this._predicting()) {
+      const bx = me.x;
+      const by = me.y;
+      applyFullState(me, s.me, m);
+      for (const p of o.pending) me.step(DT, p.input, m);
+      const v = this.views[s.you];
+      v.errX += bx - me.x;
+      v.errY += by - me.y;
+    }
+  }
+
+  // Our apple is predicted while we can move it: in the lobby and in play.
+  _predicting() {
+    const o = this.online;
+    const me = o.mirror && o.mirror.apples[this.humanIdx];
+    return !!me && me.alive && (o.mirror.phase === "lobby" || o.mirror.phase === "playing");
+  }
+
+  _onOnlinePhase(phase) {
+    this.state = phase;
+    if (phase === "countdown") this._disposeLobby();
+    else if (phase === "playing") this.goTimer = GO_BANNER_TIME;
+    else if (phase === "over") {
+      const w = this.online.mirror.winner;
+      const msg = w === this.humanIdx ? "🏆 You win!" : w >= 0 ? `${this._onlineName(w)} wins` : "Draw";
+      this.setBanner(`${msg}  —  next round soon`);
+    }
+  }
+
+  _onlineName(i) {
+    return i === this.humanIdx ? "You" : (this.online.names && this.online.names[i]) || "Bot " + i;
+  }
+
+  _updateOnline(dt) {
+    const o = this.online;
+    if (!o.mirror) {
+      this._updateHUD();
+      return;
+    }
+    const m = o.mirror;
+    const me = m.apples[this.humanIdx];
+    const myView = this.views[this.humanIdx];
+
+    // Our inputs: one per step, sent and (while we can move) predicted.
+    o.acc = Math.min(o.acc + dt, 0.25);
+    while (o.acc >= DT) {
+      o.acc -= DT;
+      const input = this.input.sample();
+      o.seq++;
+      o.net.input(o.seq, input);
+      if (this._predicting()) {
+        o.pending.push({ s: o.seq, input });
+        if (o.pending.length > 120) o.pending.shift();
+        myView.savePrev();
+        me.step(DT, input, m);
+      }
+    }
+
+    // Everyone else (and us, when not predicting): blended between the two
+    // snapshots around renderK, which runs at real time a little behind.
+    const newest = o.snaps[o.snaps.length - 1];
+    const target = newest.k - INTERP_STEPS;
+    o.renderK += dt / DT;
+    if (Math.abs(target - o.renderK) > 30) o.renderK = target;
+    else o.renderK += (target - o.renderK) * 0.05;
+    let s0 = o.snaps[0];
+    let s1 = newest;
+    for (let i = o.snaps.length - 1; i > 0; i--) {
+      if (o.snaps[i - 1].k <= o.renderK) {
+        s0 = o.snaps[i - 1];
+        s1 = o.snaps[i];
+        break;
+      }
+    }
+    const f = s1.k > s0.k ? Math.max(0, Math.min(1, (o.renderK - s0.k) / (s1.k - s0.k))) : 1;
+    const predicting = this._predicting();
+    for (const a of m.apples) {
+      if (a.index === this.humanIdx && predicting) continue;
+      const p = s0.a[a.index] || s1.a[a.index];
+      const q = s1.a[a.index] || p;
+      if (!q) continue;
+      this.views[a.index].savePrev();
+      setFromSnapshot(a, q, p, f);
+    }
+    for (const a of m.apples) {
+      if (a.carrier) {
+        a.carrier.x = a.x;
+        a.carrier.y = a.y - C.SPAWN_REST_Y;
+      }
+    }
+
+    // Stomps and knockouts, as the apples drawn reach them.
+    while (o.events.length && o.events[0][1] <= o.renderK) this._onlineEvent(o.events.shift());
+
+    // Camera: from the blended snapshots too.
+    const lerp = (x, y) => x + (y - x) * f;
+    const phase = s1.ph;
+    let camY = lerp(s0.sy, s1.sy) + CAMERA_HALF_HEIGHT;
+    if (phase === "lobby") camY = C.LOBBY_CAM_Y;
+    else if (phase === "transition") {
+      const t = lerp(s0.tt, s1.tt);
+      camY = C.LOBBY_CAM_Y + (C.GAME_CAM_Y - C.LOBBY_CAM_Y) * t * t * (3 - 2 * t);
+    }
+    this.camera.position.y = camY;
+    this.ceilingY = m.scrollY + VIEW_HEIGHT;
+
+    const alpha = o.acc / DT;
+    for (const v of this.views) v.render(dt, v.index === this.humanIdx && predicting ? alpha : 1);
+    this._syncBranches(1);
+    this._updateCameraX(dt);
+
+    if (m.phase === "countdown") this.setBanner(String(Math.max(1, Math.ceil(m.countdown))));
+    else if (this.goTimer > 0) {
+      this.goTimer -= dt;
+      this.setBanner(this.goTimer > 0 ? "GO!" : "");
+    }
+    const shade = m.phase === "countdown" || m.phase === "playing" || m.phase === "over";
+    this.ceilingShade.setEnabled(shade);
+    if (shade) this.ceilingShade.position.y = this.ceilingY + 50;
+
+    this._updateShake(dt);
+    this._updateBgScroll();
+    this._updateHUD();
+  }
+
+  _onlineEvent(e) {
+    const v = (i) => this.views[i];
+    if (e[2] === "s") {
+      if (v(e[3])) v(e[3]).onStomper(!!e[5]);
+      if (v(e[4])) v(e[4]).onStomped(!!e[5]);
+    } else if (e[2] === "o" && v(e[3])) {
+      v(e[3]).eliminate();
+    }
+  }
+
+  _updateOnlineHUD() {
+    const o = this.online;
+    const touch = matchMedia("(hover: none) and (pointer: coarse)").matches;
+    if (!o.mirror) {
+      this.hud.innerHTML = "Online · finding a lobby…";
+      return;
+    }
+    if (this.state === "lobby") {
+      const others = o.humans - 1;
+      const who = others > 0 ? `${others} other player${others > 1 ? "s" : ""}` : "just you so far";
+      const go = o.humans === 1 ? (touch ? " · tap Start now" : " · G: start now") : "";
+      this.hud.innerHTML =
+        `Online lobby · ${who} · starts in ${o.lobbyLeft}s · empty seats get bots${go}` +
+        `<br><span class="keys" style="opacity:.65">A/D move · SPACE jump (hold: big jump · in air: pound) · O: play offline</span>` +
+        `<span class="taps" style="opacity:.65">◀ ▶ move · tap: jump · hold: big jump · tap in air: pound</span>`;
+      return;
+    }
+    if (this.state === "transition") {
+      this.hud.innerHTML = "Into the tree…";
+      return;
+    }
+    const alive = this.round.apples.filter((a) => a.alive).length;
+    const you = this.round.apples[this.humanIdx];
+    const status = you && !you.alive ? "  ·  you're out — spectating" : "";
+    this.hud.innerHTML =
+      `Online · ${o.humans} player${o.humans > 1 ? "s" : ""} · Alive: ${alive}/${NUM_APPLES}${status}` +
+      `<br><span class="keys" style="opacity:.65">A/D move · SPACE jump (hold: big jump · in air: pound)` +
+      ` · stomp heads to knock rivals down</span>` +
+      `<span class="taps" style="opacity:.65">◀ ▶ move · tap: jump · hold: big jump · tap in air: pound</span>`;
+  }
+
   // Start a shake unless a stronger one is still running.
   shake(amount, kind = "hit") {
     if (amount < this.shakeAmp) return;
@@ -1017,17 +1337,13 @@ class Game {
   _updateHUD() {
     if (!this.hud) return;
     const tier = BOT_TIERS[this.difficulty].name;
-    if (this.diffEl) {
-      this.diffEl.style.display = this.state === "lobby" ? "block" : "none";
-      for (const el of this.diffEl.children) {
-        el.classList.toggle("on", +el.dataset.tier === this.difficulty);
-      }
-    }
+    this._updateBar();
+    if (this.online) return this._updateOnlineHUD();
     if (this.state === "lobby") {
       const s = Math.max(0, Math.ceil(this.lobbyTimer));
       this.hud.innerHTML =
         `Lobby · round starts in ${s}s · bots: ${tier}` +
-        `<span class="keys" style="opacity:.65"> (1–4)</span>` +
+        `<span class="keys" style="opacity:.65"> (1–4 · O: play online)</span>` +
         `<br><span class="keys" style="opacity:.65">A/D move · SPACE jump (hold: big jump · in air: pound) · roam around</span>` +
         `<span class="taps" style="opacity:.65">◀ ▶ move · tap: jump · hold: big jump · tap in air: pound</span>`;
       return;
@@ -1044,6 +1360,27 @@ class Game {
       `<br><span class="keys" style="opacity:.65">A/D move · SPACE jump (hold: big jump · in air: pound)` +
       ` · stomp heads to knock rivals down</span>` +
       `<span class="taps" style="opacity:.65">◀ ▶ move · tap: jump · hold: big jump · tap in air: pound</span>`;
+  }
+
+  // The lobby's buttons (top right): offline, the bot difficulty and "Play
+  // online"; online, "Play offline" and, alone in the lobby, "Start now".
+  _updateBar() {
+    if (!this.diffEl) return;
+    let html = "";
+    if (this.online) {
+      const o = this.online;
+      if (this.state === "lobby" || !o.mirror) html = `<span data-act="online">Play offline</span>`;
+      if (o.mirror && this.state === "lobby" && o.humans === 1) html += `<span data-act="go" class="on">Start now</span>`;
+    } else if (this.state === "lobby") {
+      html =
+        BOT_TIERS.map((t, i) => `<span data-tier="${i}"${i === this.difficulty ? ' class="on"' : ""}>${t.name}</span>`).join("") +
+        `<span data-act="online">Play online</span>`;
+    }
+    if (html !== this.barHtml) {
+      this.barHtml = html;
+      this.diffEl.innerHTML = html;
+      this.diffEl.style.display = html ? "block" : "none";
+    }
   }
 
   setBanner(text) {
