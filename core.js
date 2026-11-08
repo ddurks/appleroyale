@@ -464,7 +464,8 @@
       this.layout = (opts.layout || ROWS_LAYOUT).create(mulberry32(this.seed), C);
       this.apples = [];
       this.branches = [];
-      this.nextBranchId = 1;
+      this.nextBranchId = 1; // layout branches count up from 1, the same everywhere
+      this.nextSpecialId = -1; // ground, carriers and the start branch count down
       this.phase = "lobby";
       this.t = 0;
       this.roundTime = 0;
@@ -479,18 +480,27 @@
     }
 
     _branch(x, y, w) {
-      const b = new Branch(this.nextBranchId++, x, y, w);
+      const b = new Branch(this.nextSpecialId--, x, y, w);
       this.branches.push(b);
       return b;
     }
 
-    // Lobby: apples at xs (one per apple) dropping onto a wide solid ground.
-    startLobby(xs) {
+    // Lobby: a wide solid ground; apples at xs drop onto it. More can join
+    // with addApple until the lobby ends.
+    startLobby(xs = []) {
       this.phase = "lobby";
       const ground = this._branch(0, C.LOBBY_GROUND_Y - 0.58, 60);
       ground.solid = true;
       ground.ground = true; // invisible (the renderer draws grass instead)
-      this.apples = xs.map((x, i) => new Apple(i, x, C.LOBBY_GROUND_Y + 2));
+      for (const x of xs) this.addApple(x);
+    }
+
+    // One more apple dropping into the lobby at x; returns it (null if full).
+    addApple(x) {
+      if (this.phase !== "lobby" || this.apples.length >= this.n) return null;
+      const a = new Apple(this.apples.length, x, C.LOBBY_GROUND_Y + 2);
+      this.apples.push(a);
+      return a;
     }
 
     // End the lobby: every apple is carried up onto its start slot, assigned
@@ -688,7 +698,43 @@
     return t * t * (3 - 2 * t);
   }
 
-  const CORE = { C, APPLE_HULL, mulberry32, polygonContact, Branch, Apple, Round, ROWS_LAYOUT };
+  // A fingerprint of the rules: a scripted round (every phase, scripted
+  // inputs, stomps and all) hashed step by step. Two copies of this file
+  // that play differently give different digests, so a server can tell a
+  // client whose rules are out of date.
+  function rulesDigest() {
+    let h = 0x811c9dc5; // FNV-1a
+    const mix = (v) => {
+      const s = typeof v === "number" ? v.toPrecision(17) : String(v);
+      for (let i = 0; i < s.length; i++) {
+        h ^= s.charCodeAt(i);
+        h = Math.imul(h, 0x01000193) >>> 0;
+      }
+    };
+    const round = new Round({ seed: 12345 });
+    round.startLobby([-9, -7, -5, -3, -1, 1, 3, 5, 7, 9]);
+    const rng = mulberry32(777);
+    const held = new Array(10).fill(0); // steps left to hold the button
+    const move = new Array(10).fill(0);
+    for (let step = 0; step < 60 * 90 && round.phase !== "over"; step++) {
+      if (step === 120) round.beginTransition();
+      round.step((a) => {
+        if (rng() < 0.03) move[a.index] = Math.floor(rng() * 3) - 1;
+        if (held[a.index] > 0) held[a.index]--;
+        else if (rng() < 0.04) held[a.index] = 1 + Math.floor(rng() * 40);
+        return { move: move[a.index], button: held[a.index] > 0 };
+      });
+      for (const a of round.apples) {
+        mix(a.alive); mix(a.x); mix(a.y); mix(a.vy); mix(a.squish); mix(a.charge);
+        mix(a.pounding); mix(a.grounded); mix(a.bounceVx);
+      }
+      mix(round.phase); mix(round.scrollY); mix(round.branches.length);
+    }
+    mix(round.winner);
+    return h.toString(16);
+  }
+
+  const CORE = { C, APPLE_HULL, mulberry32, polygonContact, Branch, Apple, Round, ROWS_LAYOUT, rulesDigest };
   if (typeof module !== "undefined" && module.exports) module.exports = CORE;
   else window.APPLE_CORE = CORE;
 })();
