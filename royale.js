@@ -23,17 +23,51 @@ const NUM_APPLES = 10;
 const COUNTDOWN_TIME = 3; // "3, 2, 1, GO!" so players can prepare before the scroll starts
 
 // Apple-vs-apple interaction
-const APPLE_HALF_W = 0.5;
-const APPLE_HALF_H = 0.62;
-const STOMP_MIN_DY = 0.7; // vertical gap that counts as a head-stomp
+// Apples collide on the convex hull of their body's silhouette (see
+// Apple.bodyHull); a contact whose normal points this far up is a head-stomp.
+const STOMP_NORMAL_Y = 0.6; // ~37° or steeper from horizontal
 const STOMP_BOUNCE = JUMP_IMPULSE; // stomper bounces up
 const STOMP_PUSH_DOWN = 6; // stompee gets knocked down
 const SIDE_BOUNCE_SPEED = 5.5;
 const BOUNCE_DECAY = 6; // exp decay of side-bounce knockback
 
+// Ground-pound (S / ↓ in mid-air): brief hang, then a straight-down slam.
+const POUND_HANG = 0.1;
+const POUND_SPEED = 18; // kept low enough that stomps still register at low fps
+const POUND_PUSH_DOWN = 14; // a pound-stomp knocks the victim down harder
+const POUND_BOUNCE = 16.5; // ...and springs the pounder higher (~1.9× a stomp's height)
+
+// Squash & stretch: damped spring on the model's scale (0 = rest, 1 = pancake).
+const SQUISH_K = 160;
+const SQUISH_DAMP = 9;
+const SQUISH_HOLD = 0.18; // stay flat this long (× amount) before springing back
+const ANIM_BLEND_SPEED = 0.15; // per-frame blend weight step between clips (~0.1s)
+// Jumps don't use the model's jump clip: the apple stretches with its upward
+// speed and squishes a little on landing (all on the squash spring).
+const AIR_STRETCH = 0.3; // stretch at a normal jump's launch speed
+const LAND_SQUISH_PER_SPEED = 0.012; // landing squish per unit/s of impact
+const LAND_SQUISH_MAX = 0.3;
+
+// Charge jump: hold the action button on a branch to crouch and charge,
+// release to launch higher. Rooted while crouching, and a ground-pound onto
+// you cancels the charge.
+// Faces (assets/faces/*.png) swapped on the face decal to match the moment.
+const FACE_NAMES = ["elated", "o", "frown", "grimace", "woah"];
+const FACE_HURT_TIME = 0.7; // grimace this long after being stomped
+const FACE_DANGER = 4; // frown within this of the bottom of the screen
+const FACE_TOP = 7; // elated within this of the top of the screen
+const FACE_MIN_HOLD = 0.15; // keep a face at least this long (no flicker)
+
+const CHARGE_TIME = 0.6; // hold this long for a full charge
+const CHARGE_TAP = 0.12; // held shorter than this = a plain jump (no crouch)
+const CHARGE_BONUS = 0.45; // full charge: 1.45× launch speed (~2.1× height)
+const CHARGE_SQUISH = 0.45; // how flat a full charge crouches
+
 // Gun / bullets (gun.glb + bullet.glb models borrowed from ../cyberia).
 // Both models' barrels run along +Z; the camera looks down +Z, so a ±90°
 // yaw aims the barrel along ±X to match an apple's left/right facing.
+// Disabled for now: stomps don't arm, so nothing ever fires (code kept).
+const GUNS_ENABLED = false;
 const BULLET_SPEED = 9; // slow enough to see coming — and to bounce on
 const BULLET_LIFETIME = 2.2;
 const BULLET_HIT_R = 0.75;
@@ -52,7 +86,7 @@ const EYE_LERP = 7;
 
 // Rising kill-line ("the screen scrolls up")
 const SCROLL_BASE = 0.7; // units/sec at round start
-const SCROLL_ACCEL = 0.05; // units/sec^2 — the window keeps speeding up
+const SCROLL_ACCEL = 0.08; // units/sec^2 — the window keeps speeding up
 const SCROLL_CATCHUP = 0.85; // rubber-band the floor toward the pack
 const SCROLL_SAFE_GAP = 7; // if lowest apple is this far up, speed the floor up
 const KILL_GRACE = 1.0; // die this far below the visible bottom
@@ -67,7 +101,7 @@ const BRANCH_X_LIMIT = 10; // branches span the full play width
 const BRANCH_PER_ROW_MIN = 2; // branches per row (kept sparse)
 const BRANCH_PER_ROW_MAX = 3;
 const BRANCH_Y_JITTER = 0.6; // stagger heights so rows aren't flat
-const BRANCH_W_MIN = 4;
+const BRANCH_W_MIN = 2; // narrow ones leave open gaps to pound through
 const BRANCH_W_MAX = 6;
 const BRANCH_V_CLEAR = 1.3; // branches this close vertically must not share x-span
 const BRANCH_H_GAP = 0.7; // horizontal gap kept between them (no visual overlap)
@@ -89,10 +123,37 @@ const GAME_CAM_Y = START_FLOOR_Y + CAMERA_HALF_HEIGHT; // where the round begins
 const TRANSITION_TIME = 2.2; // scroll-up duration
 const SPAWN_REST_Y = 0.85; // = BRANCH_HALF_THICK + APPLE_FOOT: apple center resting on a y=0 branch
 
+// Bottom edge of both canopy layers, in world units above BG_BOTTOM_Y: one big
+// cartoon arc (lowest at the trunk, curving up toward the screen edges) whose
+// outline is a row of round scallops. Never below 0, so the leaf texture's
+// vertical wrap seam stays out of view.
+const CANOPY_ARC_R = 46; // radius of the circular arc (~8 units of rise at x = ±26)
+const CANOPY_ARC_HALF_W = 40; // the arc spans ±this (off-screen); flat beyond
+const CANOPY_SCALLOP_W = 4.4; // width of one round bump
+const CANOPY_SCALLOP_D = 1.9; // how far each bump hangs below its cusps
+function canopyEdge(x) {
+  const ax = Math.min(Math.abs(x), CANOPY_ARC_HALF_W);
+  const arc = CANOPY_ARC_R - Math.sqrt(CANOPY_ARC_R * CANOPY_ARC_R - ax * ax);
+  // -1..1 across each bump; one bump is centered on the trunk
+  const u = ((((x / CANOPY_SCALLOP_W + 0.5) % 1) + 1) % 1) * 2 - 1;
+  return arc + CANOPY_SCALLOP_D * (1 - Math.sqrt(1 - u * u));
+}
+
 // Horizontal camera follow — keeps the human on screen on narrow (mobile)
 // aspect ratios; on wide screens the whole field fits and the camera stays put.
 const CAM_FOLLOW_EDGE = 12; // keep the view within ±this many world units horizontally
 const CAM_FOLLOW_LERP = 5; // follow smoothing
+
+// Screen shake. Getting stomped on: a jittery wobble ("hit"). Stomping on
+// someone: a single vertical thump that springs back ("bounce"). Pounds are
+// stronger in both cases.
+const SHAKE_STOMP = 0.18; // peak camera offset, world units
+const SHAKE_POUND = 0.32;
+const SHAKE_DECAY = 9; // 1/s, exponential falloff
+const SHAKE_BOUNCE = 0.14;
+const SHAKE_BOUNCE_POUND = 0.24;
+const SHAKE_BOUNCE_FREQ = 30; // rad/s — one slow bob, vs the hit's fast jitter
+const SHAKE_BOUNCE_DECAY = 7;
 
 // Apples move kinematically (code-driven vertical velocity), which makes
 // branches one-way platforms: you pass up through them and land on top.
@@ -100,7 +161,34 @@ const CAM_FOLLOW_LERP = 5; // follow smoothing
 const APPLE_FOOT = 0.6; // apple center → feet
 const BRANCH_HALF_THICK = 0.25; // branch top surface = branch.y + this (branch radius)
 const APPLE_X_LIMIT = 11; // keep apples within the play area
+const APPLE_TOP = 1.1; // apple center → top of the leaves (the screen top is a ceiling)
 const INDICATOR_Y = 2.2; // "you" arrow rest height (well above the stem)
+
+// Bot brains (bots.js, trained in bots/): the policy reads these constants
+// under the bot lab's names (bots/sim.js C) and is ticked at a fixed DT.
+const BOT_C = {
+  DT: 1 / 60,
+  MOVE_SPEED, JUMP_IMPULSE, SCENE_GRAVITY, NUM_APPLES,
+  STOMP_NORMAL_Y, STOMP_BOUNCE, STOMP_PUSH_DOWN, SIDE_BOUNCE_SPEED, BOUNCE_DECAY,
+  POUND_HANG, POUND_SPEED, POUND_PUSH_DOWN, POUND_BOUNCE,
+  SQUISH_K, SQUISH_DAMP, SQUISH_HOLD, AIR_STRETCH, LAND_SQUISH_PER_SPEED, LAND_SQUISH_MAX,
+  CHARGE_TIME, CHARGE_TAP, CHARGE_BONUS, CHARGE_SQUISH,
+  SCROLL_BASE, SCROLL_ACCEL, SCROLL_CATCHUP, SCROLL_SAFE_GAP, KILL_GRACE, START_FLOOR_Y,
+  CAMERA_HALF_HEIGHT,
+  BRANCH_GAP_MIN, BRANCH_GAP_MAX, BRANCH_X_LIMIT, BRANCH_PER_ROW_MIN, BRANCH_PER_ROW_MAX,
+  BRANCH_Y_JITTER, BRANCH_W_MIN, BRANCH_W_MAX, BRANCH_V_CLEAR, BRANCH_H_GAP, JUMP_REACH,
+  SPAWN_SPREAD, SPAWN_REST_Y, APPLE_FOOT, BRANCH_HALF_THICK, APPLE_X_LIMIT,
+  MAX_ROUND_TIME: 600,
+};
+// Bot difficulty, picked in the lobby (keys 1–4). Levels: see bots/TIERS.md.
+const BOT_START_JITTER = 0.7; // each bot reacts to "GO!" up to this late, so they don't all launch on one frame
+const BOT_TIERS = [
+  { name: "Easy", level: 0 },
+  { name: "Normal", level: 0.3 },
+  { name: "Hard", level: 0.6 },
+  { name: "Expert", level: 1 },
+];
+const DIFFICULTY_KEY = "appleRoyale.difficulty";
 
 // ─── Bark Material ───────────────────────────────────────────────────
 
@@ -112,13 +200,77 @@ function createBarkMaterial(name, scene) {
   return mat;
 }
 
+// ─── 2D convex shapes (apple collisions) ─────────────────────────────
+
+// Andrew's monotone chain: the convex hull of [[x, y], …], counter-clockwise.
+function convexHull(points) {
+  const pts = points.slice().sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+  const cross = (o, a, b) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+  const lower = [];
+  for (const p of pts) {
+    while (lower.length >= 2 && cross(lower[lower.length - 2], lower[lower.length - 1], p) <= 0) lower.pop();
+    lower.push(p);
+  }
+  const upper = [];
+  for (let i = pts.length - 1; i >= 0; i--) {
+    const p = pts[i];
+    while (upper.length >= 2 && cross(upper[upper.length - 2], upper[upper.length - 1], p) <= 0) upper.pop();
+    upper.push(p);
+  }
+  lower.pop();
+  upper.pop();
+  return lower.concat(upper);
+}
+
+// Separating-axis test between convex polygons A and B. Returns the unit
+// contact normal pointing from B toward A, or null when they don't touch.
+function polygonContact(A, B) {
+  let best = Infinity;
+  let nx = 0;
+  let ny = 0;
+  for (const P of [A, B]) {
+    for (let i = 0; i < P.length; i++) {
+      const p = P[i];
+      const q = P[(i + 1) % P.length];
+      const len = Math.hypot(q[0] - p[0], q[1] - p[1]);
+      if (len === 0) continue;
+      const ax = (q[1] - p[1]) / len;
+      const ay = (p[0] - q[0]) / len;
+      let minA = Infinity, maxA = -Infinity, minB = Infinity, maxB = -Infinity;
+      for (const v of A) {
+        const d = v[0] * ax + v[1] * ay;
+        if (d < minA) minA = d;
+        if (d > maxA) maxA = d;
+      }
+      for (const v of B) {
+        const d = v[0] * ax + v[1] * ay;
+        if (d < minB) minB = d;
+        if (d > maxB) maxB = d;
+      }
+      const overlap = Math.min(maxA, maxB) - Math.max(minA, minB);
+      if (overlap <= 0) return null;
+      if (overlap < best) {
+        best = overlap;
+        // Point the axis from B's side toward A's side.
+        const flip = minA + maxA < minB + maxB;
+        nx = flip ? -ax : ax;
+        ny = flip ? -ay : ay;
+      }
+    }
+  }
+  return { nx, ny };
+}
+
 // ─── InputManager ────────────────────────────────────────────────────
 
 class InputManager {
   constructor() {
     this.left = false;
     this.right = false;
+    // Space is the one action button: tap = jump, hold then release =
+    // charged jump, press in the air = ground-pound (see Apple.update).
     this._jumpReq = false;
+    this._jumpRelReq = false;
     this._jumpHeld = false;
     this._fireReq = false;
     this._fireHeld = false;
@@ -141,6 +293,41 @@ class InputManager {
       this._key(e.code, true);
     });
     window.addEventListener("keyup", (e) => this._key(e.code, false));
+
+    // Touch arrows (index.html #touch) press the same keys. Releasing,
+    // cancelling, or sliding a finger off an arrow lets it go.
+    for (const btn of document.querySelectorAll("#touch [data-code]")) {
+      const code = btn.dataset.code;
+      btn.addEventListener("pointerdown", (e) => {
+        e.preventDefault();
+        this._key(code, true);
+      });
+      for (const ev of ["pointerup", "pointercancel", "pointerleave"]) {
+        btn.addEventListener(ev, () => this._key(code, false));
+      }
+    }
+    // A touch (or click) anywhere else on the game view is the action button,
+    // held while any such finger stays down. It also restarts a finished round.
+    const canvas = document.getElementById("renderCanvas");
+    const actionPointers = new Set();
+    const press = (e) => {
+      this._restartReq = true;
+      actionPointers.add(e.pointerId);
+      this._key("Space", true);
+    };
+    canvas.addEventListener("pointerdown", press);
+    // ...and so is the apple button in the touch bar.
+    document.getElementById("action").addEventListener("pointerdown", (e) => {
+      e.preventDefault();
+      press(e);
+    });
+    const release = (e) => {
+      if (actionPointers.delete(e.pointerId) && actionPointers.size === 0) {
+        this._key("Space", false);
+      }
+    };
+    window.addEventListener("pointerup", release);
+    window.addEventListener("pointercancel", release);
   }
 
   _key(code, down) {
@@ -148,6 +335,7 @@ class InputManager {
     if (code === "ArrowRight" || code === "KeyD") this.right = down;
     if (code === "Space") {
       if (down && !this._jumpHeld) this._jumpReq = true;
+      if (!down && this._jumpHeld) this._jumpRelReq = true;
       this._jumpHeld = down;
     }
     if (code === "KeyF") {
@@ -157,6 +345,11 @@ class InputManager {
     if (code === "KeyR" && down) this._restartReq = true;
   }
 
+  consumeJumpRelease() {
+    const v = this._jumpRelReq;
+    this._jumpRelReq = false;
+    return v;
+  }
   consumeJump() {
     const v = this._jumpReq;
     this._jumpReq = false;
@@ -184,6 +377,7 @@ class RoyaleBranch {
     this.y = y;
     this.w = w;
     this.dead = false;
+    this.solid = false; // solid branches can't be dropped through when stomped
 
     this.visual = BABYLON.MeshBuilder.CreateCylinder(
       "branchVis",
@@ -224,6 +418,7 @@ class Apple {
     // Locomotion state (vertical velocity is code-driven)
     this.grounded = false;
     this.standingBranch = null;
+    this.vx = 0; // last frame's horizontal velocity (intent + knockback), for bots
     this.vy = 0;
     this.coyote = 0;
     this.jumpBuffer = 0;
@@ -231,6 +426,22 @@ class Apple {
     this._pendingJump = 0;
     this.bounceVx = 0;
     this.facing = 1;
+    this.pounding = false;
+    this.poundHang = 0;
+    this.charging = false;
+    this.charge = 0;
+    this.dropThrough = false; // set when stomped: pass through one branch
+    this.passBranch = null; // the branch being passed through
+
+    // Face expression
+    this.face = "default";
+    this.faceHeld = 0;
+    this.hurt = 0;
+
+    // Squash & stretch spring
+    this.squish = 0;
+    this.squishV = 0;
+    this.squishHold = 0;
 
     // Animation
     this.anims = {};
@@ -245,6 +456,13 @@ class Apple {
     this.aiVx = 0;
     this.aiJump = false;
     this.aiFire = false;
+    this.aiPound = false;
+    // Trained bot policy (bots.js), set when the round starts (_beginTransition)
+    this.brain = null;
+    this.brainOut = {};
+    this.brainButton = false;
+    this.brainAcc = 0;
+    this.brainDelay = 0; // seconds after "GO!" before the brain starts acting
 
     // Invisible physics capsule (model is parented on top)
     this.mesh = BABYLON.MeshBuilder.CreateCapsule(
@@ -269,12 +487,28 @@ class Apple {
       false,
     );
     this.root = inst.rootNodes[0];
-    this.root.parent = this.mesh;
-    this.root.position.set(0, -0.6, 0);
+    // Squash pivot at the apple's feet, so squishing keeps it on its branch.
+    this.squashNode = new BABYLON.TransformNode(`sq${this.index}`, this.scene);
+    this.squashNode.parent = this.mesh;
+    this.squashNode.position.set(0, -0.6, 0);
+    this.root.parent = this.squashNode;
     for (const m of this.root.getChildMeshes(false)) m.renderingGroupId = 2;
+    // Each apple gets its own face material so expressions don't sync up.
+    const faceMesh = this.root.getChildMeshes(false).find((m) => /_face$/.test(m.name));
+    if (faceMesh) {
+      this.faceMat = faceMesh.material.clone(`face${this.index}`);
+      faceMesh.material = this.faceMat;
+      this.faceDefault = this.faceMat.albedoTexture || this.faceMat.diffuseTexture;
+    }
 
     for (const ag of inst.animationGroups) {
       ag.stop();
+      // Ease between clips instead of cutting: the jump clip ends with the
+      // body raised, so a hard switch to idle on landing snapped it down.
+      for (const ta of ag.targetedAnimations) {
+        ta.animation.enableBlending = true;
+        ta.animation.blendingSpeed = ANIM_BLEND_SPEED;
+      }
       const n = ag.name.toLowerCase();
       if (n.includes("jump")) this.anims.jump = ag;
       else if (n.includes("idle")) this.anims.idle = ag;
@@ -405,15 +639,38 @@ class Apple {
     // ── Intent (human input or bot AI) ───────────────────────────────
     let vx = 0;
     let fire = false;
+    let pound = false;
+    let jumpPress = false;
+    let jumpRelease = false;
+    let held = false; // action button down right now
     const st = this.game.state;
     if (st === "playing") {
       if (this.isHuman) {
         const input = this.game.input;
         if (input.left) vx -= MOVE_SPEED;
         if (input.right) vx += MOVE_SPEED;
-        if (input.consumeJump()) this.jumpBuffer = 0.15;
+        jumpPress = input.consumeJump();
+        jumpRelease = input.consumeJumpRelease();
+        held = input._jumpHeld;
         if (input.consumeFire()) fire = true;
+      } else if (this.brain && !GUNS_ENABLED) {
+        // Trained policy, same button as a human. Ticked at the bot lab's
+        // fixed 60 Hz; between ticks its last output is held.
+        this.brainAcc = Math.min(this.brainAcc + dt, BOT_C.DT);
+        if (this.brainAcc >= BOT_C.DT * 0.75) {
+          this.brainAcc -= BOT_C.DT;
+          this.brainOut = this.game.roundTime < this.brainDelay ? {} : this.brain.act(this, this.game) || {};
+        }
+        const out = this.brainOut;
+        vx = out.move > 0 ? MOVE_SPEED : out.move < 0 ? -MOVE_SPEED : 0;
+        const btn = !!out.button;
+        jumpPress = btn && !this.brainButton;
+        jumpRelease = !btn && this.brainButton;
+        this.brainButton = btn;
+        held = btn;
       } else {
+        // Legacy climb AI, kept for its gun logic: only used while
+        // GUNS_ENABLED (the trained policy knows nothing about guns).
         this._ai(dt);
         vx = this.aiVx;
         if (this.aiJump) {
@@ -424,6 +681,10 @@ class Apple {
           fire = true;
           this.aiFire = false;
         }
+        if (this.aiPound) {
+          pound = true;
+          this.aiPound = false;
+        }
       }
     } else if (st === "lobby") {
       // Free roam on the ground — no climbing, no combat.
@@ -431,11 +692,29 @@ class Apple {
         const input = this.game.input;
         if (input.left) vx -= MOVE_SPEED;
         if (input.right) vx += MOVE_SPEED;
-        if (input.consumeJump()) this.jumpBuffer = 0.15;
+        jumpPress = input.consumeJump();
+        jumpRelease = input.consumeJumpRelease();
+        held = input._jumpHeld;
       } else {
         vx = this._lobbyWander(dt);
       }
     }
+
+    // One action button (humans): on a branch, a press starts a charge that
+    // launches on release (a quick tap is a plain jump). In the air it
+    // ground-pounds, except just after leaving a branch (coyote), where it
+    // still jumps.
+    if (jumpPress) {
+      if (this.grounded && this.jumpWindup <= 0) {
+        this.charging = true;
+        this.charge = 0;
+      } else if (this.coyote > 0) {
+        this.jumpBuffer = 0.15;
+      } else {
+        pound = true;
+      }
+    }
+    if (st !== "playing" && st !== "lobby") this.charging = false;
 
     // ── Jump (buffered + coyote + tiny wind-up) ─────────────────────
     if (this.grounded) this.coyote = 0.1;
@@ -447,7 +726,6 @@ class Apple {
       this.jumpWindup = 0.08;
       this.jumpBuffer = 0;
       this.coyote = 0;
-      this._play("jump", false);
       this._pendingJump = JUMP_IMPULSE;
     }
     if (this.jumpWindup > 0) {
@@ -459,11 +737,64 @@ class Apple {
       }
     }
 
+    // ── Charge jump: hold to crouch (rooted, squishing down), release to
+    // launch higher. Taps under CHARGE_TAP never crouch or root. ────────
+    if (this.charging) {
+      if (!this.grounded) {
+        this.charging = false; // knocked off, or the branch went away
+      } else {
+        this.charge = Math.min(this.charge + dt, CHARGE_TIME);
+        const f = Math.max(0, (this.charge - CHARGE_TAP) / (CHARGE_TIME - CHARGE_TAP));
+        if (this.charge > CHARGE_TAP) vx = 0;
+        // Crouch deeper as it charges; a deeper landing squish is held, not
+        // sprung back, so a landing flows straight into the crouch.
+        this.squish = Math.max(this.squish, CHARGE_SQUISH * f);
+        this.squishV = 0;
+        this.squishHold = Math.max(this.squishHold, dt);
+        if (jumpRelease) {
+          this.charging = false;
+          this.vy = JUMP_IMPULSE * (1 + CHARGE_BONUS * f);
+          this.grounded = false;
+          this.coyote = 0;
+        }
+      }
+    }
+
+    // ── Ground-pound: hang, then slam straight down ─────────────────
+    if (pound && !this.grounded && !this.pounding) {
+      this.pounding = true;
+      this.poundHang = POUND_HANG;
+      this.jumpWindup = 0;
+      this._pendingJump = 0;
+      this.coyote = 0;
+    }
+    if (this.pounding) {
+      vx = 0;
+      if (this.poundHang > 0) {
+        this.poundHang -= dt;
+        this.vy = 0;
+      } else {
+        this.vy = -POUND_SPEED;
+        this.squish = -0.3; // stretched tall while slamming
+        this.squishV = 0;
+      }
+    }
+
     // ── Kinematic integration ───────────────────────────────────────
     this.bounceVx *= Math.exp(-BOUNCE_DECAY * dt);
-    let nx = p.x + (vx + this.bounceVx) * dt;
+    this.vx = vx + this.bounceVx;
+    let nx = p.x + this.vx * dt;
     nx = Math.max(-APPLE_X_LIMIT, Math.min(APPLE_X_LIMIT, nx));
     let ny = p.y + this.vy * dt;
+    // While playing, the top of the screen is solid: bonk and fall back.
+    if (st === "playing") {
+      const cam = this.game.camera;
+      const ceil = cam.position.y + cam.orthoTop - APPLE_TOP;
+      if (ny > ceil) {
+        ny = ceil;
+        if (this.vy > 0) this.vy = 0;
+      }
+    }
 
     // One-way platforms: land only while descending, only from above the
     // top surface — so apples pass straight up through a branch from below.
@@ -473,7 +804,7 @@ class Apple {
       const prevFoot = p.y - APPLE_FOOT;
       const foot = ny - APPLE_FOOT;
       for (const b of this.game.branches) {
-        if (b.dead || nx < b.x - b.w / 2 || nx > b.x + b.w / 2) continue;
+        if (b.dead || b === this.passBranch || nx < b.x - b.w / 2 || nx > b.x + b.w / 2) continue;
         const top = b.y + BRANCH_HALF_THICK;
         if (prevFoot >= top - 0.02 && foot <= top + 0.25) {
           if (landTop === null || top > landTop) {
@@ -482,14 +813,35 @@ class Apple {
           }
         }
       }
+      // Bounced on: drop through the branch underfoot, or the next one below.
+      if (this.standingBranch && this.dropThrough && !this.standingBranch.solid) {
+        this.passBranch = this.standingBranch;
+        this.dropThrough = false;
+        this.standingBranch = null;
+      }
     }
     if (this.standingBranch) {
+      this.dropThrough = false;
+      this.passBranch = null;
       ny = landTop + APPLE_FOOT;
+      const landed = !this.grounded;
+      const impact = this.grounded ? 0 : -this.vy;
       this.vy = 0;
       this.grounded = true;
+      if (this.pounding) {
+        this.pounding = false;
+        this.squash(0.4); // landing thud
+      } else if (impact > 1) {
+        this.squash(Math.min(LAND_SQUISH_MAX, impact * LAND_SQUISH_PER_SPEED));
+      }
+      // Button held through the landing: start charging, as if pressed now.
+      if (landed && held && !this.charging) {
+        this.charging = true;
+        this.charge = 0;
+      }
     } else {
       this.grounded = false;
-      this.vy += SCENE_GRAVITY * dt;
+      if (!this.pounding) this.vy += SCENE_GRAVITY * dt;
     }
 
     this.mesh.position.set(nx, ny, 0);
@@ -526,7 +878,86 @@ class Apple {
     if (this.grounded && this.jumpWindup <= 0) {
       if (Math.abs(vx) > 0.1) this._play(this.facing > 0 ? "moveR" : "moveL");
       else this._play("idle");
+    } else if (!this.grounded) {
+      this._play("idle"); // airborne: the squash spring does the jump pose
     }
+
+    // ── Squash & stretch ────────────────────────────────────────────
+    // Rising stretches the apple in proportion to its upward speed, easing
+    // back to round toward the top of the arc.
+    const rise = this.grounded ? 0 : Math.max(0, this.vy) / JUMP_IMPULSE;
+    const squishTarget = -AIR_STRETCH * Math.min(1.5, rise);
+    if (this.squishHold > 0) this.squishHold -= dt;
+    else {
+      this.squishV +=
+        (-SQUISH_K * (this.squish - squishTarget) - SQUISH_DAMP * this.squishV) * dt;
+      this.squish += this.squishV * dt;
+    }
+    if (this.squashNode) {
+      const s = this.squish;
+      this.squashNode.scaling.set(1 + 0.6 * s, 1 - 0.7 * s, 1 + 0.6 * s);
+    }
+
+    this._updateFace(dt);
+  }
+
+  // Expression by priority: stomped > pounding > near the bottom of the
+  // screen > rising in a jump > near the top of the screen > default.
+  _updateFace(dt) {
+    if (this.hurt > 0) this.hurt -= dt;
+    this.faceHeld += dt;
+    let want = "default";
+    const cam = this.game.camera;
+    const playing = this.game.state === "playing";
+    if (this.hurt > 0) want = "grimace";
+    else if (this.pounding) want = "woah";
+    else if (playing && this.y - (cam.position.y + cam.orthoBottom) < FACE_DANGER) want = "frown";
+    else if (!this.grounded && this.vy > 1) want = "o";
+    else if (playing && cam.position.y + cam.orthoTop - this.y < FACE_TOP) want = "elated";
+    if (want !== this.face && this.faceHeld >= FACE_MIN_HOLD) this._setFace(want);
+  }
+
+  _setFace(name) {
+    const tex = name === "default" ? this.faceDefault : this.game.faceTextures[name];
+    if (!this.faceMat || !tex) return;
+    this.face = name;
+    this.faceHeld = 0;
+    if (this.faceMat.albedoTexture !== undefined) this.faceMat.albedoTexture = tex;
+    else this.faceMat.diffuseTexture = tex;
+  }
+
+  // The convex hull of this apple's body silhouette (eyes, stem and leaves
+  // left out), as [x, y] in its squash pivot's space (origin at the feet).
+  // Read from the rendered, skinned body, so call it after a few frames.
+  bodyHull() {
+    const toPivot = this.squashNode.getWorldMatrix().clone().invert();
+    const pts = [];
+    const v = new BABYLON.Vector3();
+    for (const m of this.root.getChildMeshes(false)) {
+      if (!/body|face/.test(m.name)) continue;
+      const pos = m.getPositionData(true);
+      const toLocal = m.getWorldMatrix().multiply(toPivot);
+      for (let i = 0; i < pos.length; i += 3) {
+        BABYLON.Vector3.TransformCoordinatesFromFloatsToRef(pos[i], pos[i + 1], pos[i + 2], toLocal, v);
+        pts.push([v.x, v.y]);
+      }
+    }
+    return convexHull(pts);
+  }
+
+  // The shared body hull placed at this apple, squashed/stretched with it.
+  collisionShape(hull) {
+    const sx = this.squashNode.scaling.x;
+    const sy = this.squashNode.scaling.y;
+    const fy = this.y - APPLE_FOOT;
+    return hull.map(([x, y]) => [this.x + x * sx, fy + y * sy]);
+  }
+
+  // Flatten the apple; the spring then wobbles it back to shape.
+  squash(amount) {
+    this.squish = amount;
+    this.squishV = 0;
+    this.squishHold = SQUISH_HOLD * amount;
   }
 
   _fire() {
@@ -574,18 +1005,29 @@ class Apple {
     if (this.eyeR && this.eyeRRest) this.eyeR.rotationQuaternion = gaze.multiply(this.eyeRRest);
   }
 
-  // Head-stomp: bounce up and grab a gun.
-  applyStomp() {
-    this.vy = STOMP_BOUNCE;
+  // Head-stomp: bounce up (and grab a gun, when GUNS_ENABLED).
+  applyStomp(bounce = STOMP_BOUNCE) {
+    if (this.isHuman) this.game.shake(bounce > STOMP_BOUNCE ? SHAKE_BOUNCE_POUND : SHAKE_BOUNCE, "bounce");
+    this.vy = bounce;
     this.grounded = false;
     this.jumpWindup = 0;
-    this.armed = true;
-    this._play("jump", false);
+    this.pounding = false;
+    // Bouncing off a head cancels a pending knock-down: only being stomped
+    // on drops you through a branch.
+    this.dropThrough = false;
+    this.passBranch = null;
+    if (GUNS_ENABLED) this.armed = true;
   }
 
-  // The apple that got stomped: knocked down.
-  applyPushDown() {
-    this.vy = -STOMP_PUSH_DOWN;
+  // The apple that got stomped: squished flat and knocked down through one
+  // branch (see the landing check), unless that branch is solid.
+  applyPushDown(speed = STOMP_PUSH_DOWN, squish = 0.7) {
+    this.hurt = FACE_HURT_TIME;
+    if (this.isHuman) this.game.shake(speed > STOMP_PUSH_DOWN ? SHAKE_POUND : SHAKE_STOMP);
+    this.dropThrough = true;
+    this.vy = -speed;
+    this.pounding = false;
+    this.squash(squish);
     this.grounded = false;
     this.coyote = 0;
     this.standingBranch = null;
@@ -696,6 +1138,20 @@ class Apple {
       // Skill: low-skill bots occasionally fumble the jump; aces rarely do.
       if (this.aiJump && Math.random() > 0.6 + this.skill * 0.4) this.aiJump = false;
     }
+
+    // Falling right above a rival: sometimes slam down on them.
+    if (!this.grounded && this.vy < 0 && !this.pounding) {
+      const e = this._nearestEnemy();
+      if (
+        e &&
+        py - e.y > 1 &&
+        py - e.y < 6 &&
+        Math.abs(e.x - px) < 0.5 &&
+        Math.random() < 0.1 * this.skill
+      ) {
+        this.aiPound = true;
+      }
+    }
   }
 
   _nearestEnemy() {
@@ -760,6 +1216,32 @@ class Game {
     this.hud = document.getElementById("hud");
     this.banner = document.getElementById("banner");
 
+    // The game is the bots' `world` (apples, branches, killLine, scrollY,
+    // scrollSpeed, roundTime, t, C). Difficulty is chosen in the lobby.
+    this.C = BOT_C;
+    this.scrollSpeed = SCROLL_BASE;
+    this.shakeAmp = 0;
+    this.shakeT = 0; // seconds since the current shake started
+    this.shakeKind = "hit";
+    this.shakeOff = { x: 0, y: 0 }; // applied to the camera for this frame only
+    this.difficulty = 1; // Normal
+    try {
+      const d = localStorage.getItem(DIFFICULTY_KEY);
+      if (d !== null && BOT_TIERS[+d]) this.difficulty = +d;
+    } catch (e) {}
+    window.addEventListener("keydown", (e) => {
+      const m = /^Digit([1-4])$/.exec(e.code);
+      if (m) this._setDifficulty(+m[1] - 1);
+    });
+    // Touch/click labels: their own element (the canvas is the action button).
+    this.diffEl = document.getElementById("difficulty");
+    if (this.diffEl) {
+      this.diffEl.innerHTML = BOT_TIERS.map((t, i) => `<span data-tier="${i}">${t.name}</span>`).join("");
+      for (const el of this.diffEl.querySelectorAll("[data-tier]")) {
+        el.addEventListener("click", () => this._setDifficulty(+el.dataset.tier));
+      }
+    }
+
     window.royale = this; // handy for debugging in the console
 
     this._init().then(() => {
@@ -776,13 +1258,30 @@ class Game {
     });
   }
 
+  _setDifficulty(i) {
+    if (this.state !== "lobby" || !BOT_TIERS[i]) return;
+    this.difficulty = i;
+    try {
+      localStorage.setItem(DIFFICULTY_KEY, String(i));
+    } catch (e) {}
+  }
+
   _updateOrtho() {
     if (!this.camera) return;
     const aspect = this.engine.getAspectRatio(this.camera);
-    const halfH = CAMERA_HALF_HEIGHT;
-    const halfW = halfH * aspect;
-    this.camera.orthoTop = halfH;
-    this.camera.orthoBottom = -halfH;
+    // Narrow (portrait) screens zoom out until the whole play width fits, so
+    // mobile players see every rival. The bottom edge (kill floor / lobby
+    // ground) stays anchored at camera.y - CAMERA_HALF_HEIGHT; the extra
+    // height opens upward.
+    const halfW = Math.max(CAMERA_HALF_HEIGHT * aspect, CAM_FOLLOW_EDGE);
+    const halfH = halfW / aspect;
+    // The touch bar spans the bottom of the screen: shift the view down by
+    // its height so it sits over the dead zone below the kill floor.
+    const canvas = this.engine.getRenderingCanvas();
+    const barPx = document.getElementById("touch").offsetHeight; // 0 when hidden
+    const pad = (2 * halfH * barPx) / canvas.clientHeight;
+    this.camera.orthoTop = 2 * halfH - CAMERA_HALF_HEIGHT - pad;
+    this.camera.orthoBottom = -CAMERA_HALF_HEIGHT - pad;
     this.camera.orthoLeft = -halfW;
     this.camera.orthoRight = halfW;
   }
@@ -839,6 +1338,13 @@ class Game {
       "apple.glb",
       scene,
     );
+    this._initActionIcon();
+    this.faceTextures = {};
+    for (const name of FACE_NAMES) {
+      const tex = new BABYLON.Texture(`./assets/faces/${name}.png`, scene, false, false);
+      tex.hasAlpha = true;
+      this.faceTextures[name] = tex;
+    }
     // Gun + bullet models (from ../cyberia), instantiated on demand.
     this.gunContainer = await BABYLON.SceneLoader.LoadAssetContainerAsync(
       "./assets/",
@@ -860,6 +1366,15 @@ class Game {
     scene.onAfterAnimationsObservable.add(() => {
       const dt = this.engine.getDeltaTime() / 1000;
       for (const a of this.apples) a.updateEyes(dt);
+    });
+
+    // Collision hull: read from the rendered, skinned body once the idle
+    // pose has settled (posing the skeleton by hand gives a different shape).
+    let hullFrames = 0;
+    const hullObs = scene.onAfterRenderObservable.add(() => {
+      if (++hullFrames < 10 || !this.apples.length || !this.apples[0].squashNode) return;
+      this.appleHull = this.apples[0].bodyHull();
+      scene.onAfterRenderObservable.remove(hullObs);
     });
 
     this._startLobby();
@@ -897,6 +1412,7 @@ class Game {
     // 0.58 below the surface so apple bottoms rest flush on the grass, not above.
     this.groundBranch = new RoyaleBranch(this.scene, 0, LOBBY_GROUND_Y - 0.58, 60, this.barkMat);
     this.groundBranch.visual.setEnabled(false);
+    this.groundBranch.solid = true;
     this.branches.push(this.groundBranch);
 
     // Apples milling about on the ground.
@@ -963,20 +1479,22 @@ class Game {
     // Tree trunk bridging the tree down to the ground. Placed behind the green
     // ground AND both background layers (z past them), so it only shows through
     // the sky gap — occluded by the ground at the base and by the tree bg above.
-    // Diameter matches the painted trunk in the tree bg (~7% of the 20-wide
-    // world-tree). Both are world-space under an ortho camera, so the match
-    // holds on any aspect ratio (mobile or desktop).
-    const trunk = BABYLON.MeshBuilder.CreateCylinder(
-      "lobbyTrunk",
-      { height: 70, diameter: 1.48, tessellation: 16 },
-      scene,
-    );
-    trunk.parent = root;
-    // Its own bark material (same colour) — NOT the shared branch barkMat, so
-    // disposing the lobby doesn't dispose barkMat and leave branches white.
-    trunk.material = createBarkMaterial("lobbyTrunkMat", scene);
-    trunk.position.set(0, -18, 41);
-    trunk.isPickable = false;
+    // Diameter matches the painted trunk in the tree layer (99 of 1080 px on
+    // the 20-wide world-tree = 1.83). Both are world-space under an ortho
+    // camera, so the match holds on any aspect ratio (mobile or desktop).
+    // Built once and kept (not under lobbyRoot), so it stays up through rounds.
+    if (!this.trunk) {
+      const trunk = BABYLON.MeshBuilder.CreateCylinder(
+        "trunk",
+        { height: 70, diameter: 1.83, tessellation: 16 },
+        scene,
+      );
+      // Its own bark material (same colour) — NOT the shared branch barkMat.
+      trunk.material = createBarkMaterial("trunkMat", scene);
+      trunk.position.set(0, -18, 41);
+      trunk.isPickable = false;
+      this.trunk = trunk;
+    }
   }
 
   _disposeLobby() {
@@ -990,6 +1508,7 @@ class Game {
 
   _updateLobby(dt) {
     for (const a of this.apples) a.update(dt);
+    this._resolveCollisions(); // bump & stomp while waiting, same as a round
     this._updateCameraX(dt);
     this.lobbyTimer -= dt;
     if (this.lobbyTimer <= 0) this._beginTransition();
@@ -1029,8 +1548,17 @@ class Game {
       this.branches.push(a.startBranch);
     }
 
+    // Every bot gets a fresh brain at the chosen difficulty.
+    const level = BOT_TIERS[this.difficulty].level;
+    for (const a of this.apples) {
+      if (a.isHuman) continue;
+      a.brain = APPLE_BOT.create(Math.random, { level });
+      a.brainDelay = Math.random() * BOT_START_JITTER;
+    }
+
     // Build the tree field above (revealed as the camera rises).
     this.roundTime = 0;
+    this.scrollSpeed = SCROLL_BASE;
     this.scrollY = START_FLOOR_Y;
     this.killLine = this.scrollY - KILL_GRACE;
     this.nextBranchY = 2.6;
@@ -1059,12 +1587,20 @@ class Game {
   }
 
   _finishTransition() {
+    // The per-apple carrier branches become one long starting branch across
+    // the whole play width, so there's no gap to fall through.
+    const start = new RoyaleBranch(this.scene, 0, 0, 2 * (APPLE_X_LIMIT + 0.5), this.barkMat);
+    start.solid = true;
+    this.branches.push(start);
     for (const a of this.apples) {
       a.mesh.position.set(a.transTo.x, a.transTo.y, 0);
       a.vy = 0;
       a.grounded = true;
-      a.standingBranch = a.startBranch || null;
-      if (a.startBranch) a.startBranch.setPosition(a.transTo.x, 0);
+      a.standingBranch = start;
+      if (a.startBranch) {
+        this.branches.splice(this.branches.indexOf(a.startBranch), 1);
+        a.startBranch.dispose();
+      }
       a.startBranch = null;
       a.transFrom = a.transTo = null;
     }
@@ -1078,7 +1614,7 @@ class Game {
   // ── Branch generation ────────────────────────────────────────────
 
   _fillBranches() {
-    const top = this.camera.position.y + CAMERA_HALF_HEIGHT + 6;
+    const top = this.camera.position.y + this.camera.orthoTop + 6;
     while (this.nextBranchY < top) {
       this._spawnRow(this.nextBranchY);
       this.nextBranchY +=
@@ -1216,7 +1752,10 @@ class Game {
   // ── Apple-vs-apple resolution ────────────────────────────────────
 
   _resolveCollisions() {
+    const hull = this.appleHull;
+    if (!hull) return; // taken from the rendered body a few frames in (_init)
     const a = this.apples;
+    const shapes = a.map((ap) => (ap.alive ? ap.collisionShape(hull) : null));
     for (let i = 0; i < a.length; i++) {
       if (!a[i].alive) continue;
       for (let j = i + 1; j < a.length; j++) {
@@ -1224,13 +1763,19 @@ class Game {
         const A = a[i];
         const B = a[j];
         const dx = A.x - B.x;
-        const dy = A.y - B.y;
-        if (Math.abs(dx) < 2 * APPLE_HALF_W && Math.abs(dy) < 2 * APPLE_HALF_H) {
-          const upper = dy >= 0 ? A : B;
-          const lower = dy >= 0 ? B : A;
-          if (Math.abs(dy) > STOMP_MIN_DY && upper.vy < 1.0) {
-            upper.applyStomp();
-            lower.applyPushDown();
+        const contact = polygonContact(shapes[i], shapes[j]);
+        if (contact) {
+          const upper = contact.ny >= 0 ? A : B;
+          const lower = contact.ny >= 0 ? B : A;
+          if (Math.abs(contact.ny) > STOMP_NORMAL_Y && upper.vy < 1.0) {
+            const pound = upper.pounding;
+            if (pound) upper.applyStomp(POUND_BOUNCE);
+            else upper.applyStomp();
+            if (pound) {
+              lower.charging = false; // a pound breaks a charge jump
+              lower.applyPushDown(POUND_PUSH_DOWN, 1);
+            }
+            else lower.applyPushDown();
           } else {
             const dir = dx >= 0 ? 1 : -1;
             A.applySideBounce(dir);
@@ -1246,13 +1791,14 @@ class Game {
   _updateScroll(dt) {
     this.roundTime += dt;
     const alive = this.apples.filter((a) => a.alive);
-    let rise = (SCROLL_BASE + SCROLL_ACCEL * this.roundTime) * dt;
+    let speed = SCROLL_BASE + SCROLL_ACCEL * this.roundTime;
     if (alive.length) {
       const lowest = Math.min(...alive.map((a) => a.y));
       const gap = lowest - this.scrollY;
-      if (gap > SCROLL_SAFE_GAP) rise += (gap - SCROLL_SAFE_GAP) * SCROLL_CATCHUP * dt;
+      if (gap > SCROLL_SAFE_GAP) speed += (gap - SCROLL_SAFE_GAP) * SCROLL_CATCHUP;
     }
-    this.scrollY += rise;
+    this.scrollSpeed = speed;
+    this.scrollY += speed * dt;
     this.camera.position.y = this.scrollY + CAMERA_HALF_HEIGHT;
     this.killLine = this.scrollY - KILL_GRACE;
   }
@@ -1261,7 +1807,7 @@ class Game {
   // whole field fits (bound = 0) so the camera stays centered; on narrow mobile
   // screens it pans to keep the player in view, clamped to the play area.
   _updateCameraX(dt) {
-    const halfW = CAMERA_HALF_HEIGHT * this.engine.getAspectRatio(this.camera);
+    const halfW = this.camera.orthoRight;
     const bound = Math.max(0, CAM_FOLLOW_EDGE - halfW);
     const you = this.apples[this.humanIdx];
     const targetX =
@@ -1274,12 +1820,14 @@ class Game {
     const alive = this.apples.filter((a) => a.alive);
     if (alive.length <= 1) {
       this.state = "over";
+      this.input.consumeRestart(); // drop a stale press/tap from mid-round
       this.winner = alive[0] || this.lastEliminated;
       const w = this.winner;
       const msg = w
         ? (w.isHuman ? "🏆 You win!" : `${this._name(w)} wins`)
         : "Draw";
-      this.setBanner(`${msg}  —  press R to restart`);
+      const touch = matchMedia("(hover: none) and (pointer: coarse)").matches;
+      this.setBanner(`${msg}  —  ${touch ? "tap" : "press R"} to restart`);
     }
   }
 
@@ -1292,6 +1840,10 @@ class Game {
   _update(dt) {
     if (this.state === "loading") return;
     this.t += dt;
+    // Take last frame's shake off so the game logic sees the steady camera.
+    this.camera.position.x -= this.shakeOff.x;
+    this.camera.position.y -= this.shakeOff.y;
+    this.shakeOff.x = this.shakeOff.y = 0;
 
     if (this.state === "lobby") {
       this._updateLobby(dt);
@@ -1328,18 +1880,108 @@ class Game {
       if (this.input.consumeRestart()) this._startLobby();
     }
 
+    this._updateShake(dt);
+    this._updateBgScroll();
     this._updateHUD();
+  }
+
+  // Start a shake unless a stronger one is still running.
+  shake(amount, kind = "hit") {
+    if (amount < this.shakeAmp) return;
+    this.shakeAmp = amount;
+    this.shakeT = 0;
+    this.shakeKind = kind;
+  }
+
+  _updateShake(dt) {
+    if (this.shakeAmp < 0.005) return;
+    const t = this.shakeT;
+    this.shakeT += dt;
+    if (this.shakeKind === "bounce") {
+      // Dip down, then spring back up past rest and settle.
+      this.shakeAmp *= Math.exp(-SHAKE_BOUNCE_DECAY * dt);
+      this.shakeOff.y = -this.shakeAmp * Math.cos(t * SHAKE_BOUNCE_FREQ);
+    } else {
+      // Two out-of-step sines: jittery without looking like random noise.
+      this.shakeAmp *= Math.exp(-SHAKE_DECAY * dt);
+      this.shakeOff.x = this.shakeAmp * Math.sin(t * 61);
+      this.shakeOff.y = this.shakeAmp * Math.cos(t * 47);
+    }
+    this.camera.position.x += this.shakeOff.x;
+    this.camera.position.y += this.shakeOff.y;
   }
 
   // ── UI ───────────────────────────────────────────────────────────
 
+  // The touch bar's action button: your apple model (minus face and eyes),
+  // rendered on its own small canvas and squashed/stretched with you. Only
+  // built when the touch bar is showing.
+  async _initActionIcon() {
+    const canvas = document.getElementById("actionCanvas");
+    if (!canvas || !document.getElementById("touch").offsetHeight) return;
+    const engine = new BABYLON.Engine(canvas, true, { alpha: true, premultipliedAlpha: false });
+    const scene = new BABYLON.Scene(engine);
+    scene.clearColor = new BABYLON.Color4(0, 0, 0, 0);
+    const hemi = new BABYLON.HemisphericLight("hemi", new V3(0.2, 1, -0.4), scene);
+    hemi.intensity = 0.95;
+    const dir = new BABYLON.DirectionalLight("dir", new V3(-0.5, -1, 0.3), scene);
+    dir.intensity = 0.4;
+    // The model stands 2.54 tall (feet to leaf tips) and 1.78 wide; a full
+    // jump stretch (plus spring overshoot) reaches ~3.5 tall.
+    const cam = new BABYLON.FreeCamera("iconCam", new V3(0, 1.75, -18), scene);
+    cam.setTarget(new V3(0, 1.75, 0));
+    cam.mode = BABYLON.Camera.ORTHOGRAPHIC_CAMERA;
+    const fit = () => {
+      engine.resize();
+      const aspect = engine.getAspectRatio(cam);
+      // Room for the tallest stretch and a stomp squash (1.6× wider + wobble).
+      const halfH = Math.max(1.85, 1.6 / aspect);
+      cam.orthoTop = halfH;
+      cam.orthoBottom = -halfH;
+      cam.orthoLeft = -halfH * aspect;
+      cam.orthoRight = halfH * aspect;
+    };
+    fit();
+    window.addEventListener("resize", fit);
+
+    const container = await BABYLON.SceneLoader.LoadAssetContainerAsync("./assets/", "apple.glb", scene);
+    const inst = container.instantiateModelsToScene((n) => `icon_${n}`, false);
+    const squash = new BABYLON.TransformNode("iconSquash", scene);
+    inst.rootNodes[0].parent = squash;
+    for (const m of inst.rootNodes[0].getChildMeshes(false)) {
+      if (/face|eyeball/.test(m.name)) m.setEnabled(false);
+    }
+    const idle = inst.animationGroups.find((g) => g.name.toLowerCase().includes("idle"));
+    for (const g of inst.animationGroups) g.stop();
+    if (idle) {
+      idle.speedRatio = 2;
+      idle.start(true);
+    }
+
+    scene.onBeforeRenderObservable.add(() => {
+      const you = this.apples[this.humanIdx];
+      if (you && you.alive && you.squashNode) squash.scaling.copyFrom(you.squashNode.scaling);
+      else squash.scaling.set(1, 1, 1);
+    });
+    engine.runRenderLoop(() => scene.render());
+  }
+
   _updateHUD() {
     if (!this.hud) return;
+    const tier = BOT_TIERS[this.difficulty].name;
+    if (this.diffEl) {
+      this.diffEl.style.display = this.state === "lobby" ? "block" : "none";
+      for (const el of this.diffEl.children) {
+        el.classList.toggle("on", +el.dataset.tier === this.difficulty);
+      }
+    }
     if (this.state === "lobby") {
       const s = Math.max(0, Math.ceil(this.lobbyTimer));
       this.hud.innerHTML =
-        `Lobby · round starts in ${s}s` +
-        `<br><span style="opacity:.65">A/D move · SPACE jump · roam around</span>`;
+        `Lobby · round starts in ${s}s · bots: ${tier}` +
+        `<span class="keys" style="opacity:.65"> (1–4)</span>` +
+        `<br><span class="keys" style="opacity:.65">A/D move · SPACE jump (hold: big jump · in air: pound) · roam around</span>` +
+        `<span class="taps" style="opacity:.65">◀ ▶ move · tap: jump · hold: big jump · tap in air: pound</span>`;
       return;
     }
     if (this.state === "transition") {
@@ -1352,8 +1994,11 @@ class Game {
     if (you && !you.alive) status = "  ·  you're out — spectating";
     else if (you && you.armed) status = "  ·  🔫 loaded — press F";
     this.hud.innerHTML =
-      `Alive: ${alive}/${NUM_APPLES}${status}` +
-      `<br><span style="opacity:.65">A/D move · SPACE jump · F shoot · stomp a head for a gun</span>`;
+      `Alive: ${alive}/${NUM_APPLES} · ${tier}${status}` +
+      `<br><span class="keys" style="opacity:.65">A/D move · SPACE jump (hold: big jump · in air: pound)` +
+      (GUNS_ENABLED ? ` · F shoot · stomp a head for a gun` : ` · stomp heads to knock rivals down`) +
+      `</span>` +
+      `<span class="taps" style="opacity:.65">◀ ▶ move · tap: jump · hold: big jump · tap in air: pound</span>`;
   }
 
   setBanner(text) {
@@ -1366,11 +2011,9 @@ class Game {
 
   // A tall textured mesh whose BOTTOM edge is jagged (leafy) instead of a flat
   // cut. UVs tile the texture in world space so it looks undistorted; the jag
-  // just clips the bottom into overlapping leaf-like scallops.
-  _buildJaggedBg(name, width, uTiles, vTiles, z) {
-    const N = Math.round(width * 2) + 2; // columns — fine enough to resolve leaves
-    const topY = BG_TOP_Y;
-    const bottomY = BG_BOTTOM_Y;
+  // just clips the bottom into a scalloped arc (see canopyEdge).
+  _buildJaggedBg(name, width, uTiles, vTiles, z, bottomY = BG_BOTTOM_Y, topY = BG_TOP_Y, uOffset = 0) {
+    const N = Math.round(width * 8) + 2; // columns — fine enough for round scallops
     const H = topY - bottomY;
     const positions = [];
     const uvs = [];
@@ -1378,16 +2021,12 @@ class Game {
     for (let i = 0; i <= N; i++) {
       const fx = i / N;
       const x = -width / 2 + fx * width;
-      // Two overlapping scallop frequencies → an organic, leaf-like fringe.
-      const jag =
-        0.7 -
-        1.5 * Math.abs(Math.sin(x * 0.5)) -
-        0.8 * Math.abs(Math.sin(x * 1.27 + 1.7));
+      const jag = canopyEdge(x);
       const by = bottomY + jag;
       positions.push(x, topY, 0);
-      uvs.push(fx * uTiles, vTiles);
+      uvs.push(uOffset + fx * uTiles, vTiles);
       positions.push(x, by, 0);
-      uvs.push(fx * uTiles, ((by - bottomY) / H) * vTiles);
+      uvs.push(uOffset + fx * uTiles, ((by - bottomY) / H) * vTiles);
     }
     for (let i = 0; i < N; i++) {
       const a = i * 2;
@@ -1414,27 +2053,50 @@ class Game {
   // On load only its bottom shows at the top of the screen; scrolling the
   // camera up reveals it until it fills the view.
   _buildBgPlane(tex) {
-    if (this.bgPlane) this.bgPlane.dispose();
+    for (const p of this.bgPlanes || []) p.dispose();
     if (this.bgMat) this.bgMat.dispose();
 
     const width = 220;
     const TILE = 58; // world units per texture tile (keeps the leaf scale)
-    const height = BG_TOP_Y - BG_BOTTOM_Y;
+    // The leaf image doesn't tile seamlessly, so instead of one tall plane the
+    // canopy is a stack of overlapping bands, each one image tall and starting
+    // at the image's bottom row. Each band's scalloped-arc bottom (canopyEdge)
+    // hangs over the band below, so every seam is a canopy edge. BAND_STEP
+    // keeps each band's top above the next band's highest edge point.
+    const BAND_STEP = 30;
+    // Center a tile on the trunk: side seams land at x = ±TILE/2, off-screen
+    // on typical widescreens.
+    const uOffset = (TILE / 2 - width / 2) / TILE;
 
     tex.wrapU = BABYLON.Texture.WRAP_ADDRESSMODE;
     tex.wrapV = BABYLON.Texture.WRAP_ADDRESSMODE;
     tex.uScale = 1;
     tex.vScale = 1;
+    // The texture is very dark (max ~0.19). Lighting/emissive clamp at 1 and
+    // multiply by the texture, so only level (scales the sample) brightens it.
+    tex.level = 2;
 
-    const plane = this._buildJaggedBg("bg", width, width / TILE, height / TILE, 40);
     const bgMat = new BABYLON.StandardMaterial("bgMat", this.scene);
     bgMat.diffuseTexture = tex;
     bgMat.emissiveTexture = tex;
     bgMat.emissiveColor = new BABYLON.Color3(1.05, 1.05, 1.05);
     bgMat.disableLighting = true;
     bgMat.backFaceCulling = false;
-    plane.material = bgMat;
-    this.bgPlane = plane;
+    // All bands hang off one node that hops up by whole BAND_STEPs as the
+    // camera climbs (_updateBgScroll), so the canopy never runs out.
+    if (!this.bgRoot) this.bgRoot = new BABYLON.TransformNode("bgRoot", this.scene);
+    this.bgStep = BAND_STEP;
+    this.bgPlanes = [];
+    for (let k = 0; BG_BOTTOM_Y + k * BAND_STEP < BG_TOP_Y; k++) {
+      const bottom = BG_BOTTOM_Y + k * BAND_STEP;
+      // Higher bands sit slightly nearer the camera, over the band below.
+      const band = this._buildJaggedBg(
+        `bg${k}`, width, width / TILE, 1, 40 - 0.05 * k, bottom, bottom + TILE, uOffset,
+      );
+      band.material = bgMat;
+      band.parent = this.bgRoot;
+      this.bgPlanes.push(band);
+    }
     this.bgMat = bgMat;
   }
 
@@ -1467,6 +2129,18 @@ class Game {
     plane.material = mat;
     this.treePlane = plane;
     this.treeMat = mat;
+    this.treeStep = tileHeight; // the trunk texture repeats every tile
+  }
+
+  // Hop the background layers up by whole repeats so the stretch below the
+  // view always starts under the camera: the picture is unchanged, but it
+  // never ends. 12 clears the tallest canopy-edge rise at the screen sides.
+  _updateBgScroll() {
+    const below = this.camera.position.y + this.camera.orthoBottom - BG_BOTTOM_Y - 12;
+    if (this.bgRoot) this.bgRoot.position.y = Math.max(0, Math.floor(below / this.bgStep)) * this.bgStep;
+    if (this.treePlane) {
+      this.treePlane.position.y = Math.max(0, Math.floor(below / this.treeStep)) * this.treeStep;
+    }
   }
 }
 

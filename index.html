@@ -13,6 +13,11 @@
         width: 100%;
         height: 100%;
         background: url("./assets/appletreebg.png") center/cover no-repeat #000;
+        /* No long-press text selection, callout menu or tap flash (iOS/Android). */
+        -webkit-user-select: none;
+        user-select: none;
+        -webkit-touch-callout: none;
+        -webkit-tap-highlight-color: transparent;
       }
       #renderCanvas {
         width: 100%;
@@ -32,6 +37,39 @@
         pointer-events: none;
         user-select: none;
       }
+      /* Bot difficulty labels (lobby only; tap or press 1-4). Not part of
+         #hud, which ignores pointers so taps reach the action button. */
+      #difficulty {
+        display: none;
+        position: absolute;
+        top: 12px;
+        right: 12px;
+        font: 14px/1.4 monospace;
+        pointer-events: auto;
+        user-select: none;
+        -webkit-user-select: none;
+      }
+      #difficulty span {
+        display: inline-block;
+        margin-left: 4px;
+        padding: 6px 8px;
+        border-radius: 4px;
+        color: rgba(255, 255, 255, 0.7);
+        background: rgba(0, 0, 0, 0.35);
+        cursor: pointer;
+      }
+      #difficulty span.on {
+        color: #fff;
+        background: rgba(0, 0, 0, 0.65);
+        font-weight: 700;
+      }
+      @media (max-width: 640px) {
+        /* narrow phones: keep clear of the HUD text, above the touch arrows */
+        #difficulty {
+          top: auto;
+          bottom: calc(var(--pad-h) + 22px + env(safe-area-inset-bottom));
+        }
+      }
       #banner {
         position: absolute;
         top: 36%;
@@ -45,17 +83,98 @@
         user-select: none;
         display: none;
       }
+      /* Touch controls — touch devices only: three equal buttons across the
+         bottom (◀ ▶ and the action apple). A touch anywhere else on the game
+         view is also the action button (see InputManager). */
+      :root {
+        --pad-gap: 14px;
+        --pad-h: min(calc((100vw - 4 * var(--pad-gap)) / 3), 24vh);
+      }
+      #touch {
+        display: none;
+        position: absolute;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        gap: var(--pad-gap);
+        padding: 0 var(--pad-gap) calc(10px + env(safe-area-inset-bottom));
+        pointer-events: none;
+      }
+      #touch button {
+        flex: 1;
+        height: var(--pad-h);
+        border: 0;
+        padding: 0;
+        background: none;
+        color: rgba(255, 255, 255, 0.85);
+        font: 700 calc(var(--pad-h) * 0.55) system-ui, sans-serif;
+        text-shadow: 0 2px 6px rgba(0, 0, 0, 0.6);
+        pointer-events: auto;
+        touch-action: none;
+        user-select: none;
+        -webkit-user-select: none;
+        -webkit-touch-callout: none;
+      }
+      #touch button:active {
+        color: #fff;
+      }
+      #touch button[data-code]:active {
+        transform: scale(0.9);
+      }
+      #action {
+        position: relative;
+        overflow: visible;
+      }
+      #action canvas {
+        /* Taller than the button (rising above it), so a full stretch or
+           squash never crops. */
+        position: absolute;
+        left: 0;
+        bottom: 0;
+        width: 100%;
+        height: 135%;
+        pointer-events: none; /* presses go to the button */
+      }
+      #hud .taps {
+        display: none;
+      }
+      @media (hover: none) and (pointer: coarse) {
+        #touch {
+          display: flex;
+        }
+        #hud .keys {
+          display: none;
+        }
+        #hud .taps {
+          display: inline;
+        }
+      }
     </style>
   </head>
   <body>
     <canvas id="renderCanvas"></canvas>
-    <div id="hud">A/D move &nbsp; SPACE jump &nbsp; F shoot</div>
+    <div id="hud">A/D move &nbsp; SPACE jump (hold: big jump · in air: pound)</div>
+    <div id="difficulty"></div>
     <div id="banner"></div>
+    <div id="touch">
+      <button data-code="ArrowLeft" aria-label="Move left">◀</button>
+      <button data-code="ArrowRight" aria-label="Move right">▶</button>
+      <button id="action" aria-label="Jump / pound">
+        <canvas id="actionCanvas"></canvas>
+      </button>
+    </div>
 
+    <script>
+      // Long press: no selection or context menu (some browsers ignore the CSS).
+      for (const ev of ["selectstart", "contextmenu"]) {
+        document.addEventListener(ev, (e) => e.preventDefault());
+      }
+    </script>
     <script src="https://cdn.babylonjs.com/babylon.js"></script>
     <script src="https://cdn.babylonjs.com/loaders/babylonjs.loaders.min.js"></script>
     <script src="https://cdn.babylonjs.com/havok/HavokPhysics_umd.js"></script>
     <script src="sliceBurst.js"></script>
+    <script src="bots.js"></script>
     <script>
       // Default: multiplayer royale. Old demos stay reachable:
       //   ?demo=classic → single-player branch platformer (game.js)
