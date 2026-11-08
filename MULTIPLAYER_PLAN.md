@@ -1,162 +1,194 @@
-# Apple Royale → Multiplayer (drawvidverse)
+# Apple Royale multiplayer: plan
 
-Design plan for turning Apple Royale into a lobby-based multiplayer battle royale
-as a new game inside the existing `../drawvidverse` framework.
+Status: agreed (2026-11-08); phase 1 in progress. This replaces the August plan, which predates
+the bot lab. Nothing below is built yet.
 
-Lobbies of ten. Configurable wait time. Empty slots fill with bots.
+Goal: **simple, elegant, robust** online rounds. Up to 10 humans per round, with bots
+filling the empty seats. Offline play against bots stays the default and keeps working
+with no server.
 
-## Decisions locked in
+## The idea in one paragraph
 
-- **Server-authoritative**, but **without ripping out the client-side logic** — the
-  simulation is shared code so any user can still **play offline vs. bots**.
-- **Client prediction + reconciliation** for the local player's apple.
-- **Auto-requeue**: survivors drop into a fresh lobby after each match.
+There is **one game core** and three places run it:
 
-## The core idea: one shared simulation, three consumers
+- the browser, offline;
+- the browser, online, to predict your own apple;
+- the drawvidverse server, which is the authority.
 
-Extract the simulation out of `royale.js` into a **dependency-free sim core** (no
-Babylon, no `ws`, no DOM) that runs *identically* in three places:
+Clients send **only their buttons** (move −1/0/1, action held or not). The server runs
+the round at a fixed 60 Hz and sends back a compact snapshot 20 times a second. Your
+own apple is predicted locally with the same core and quietly corrected. Everyone else
+is drawn ~100 ms in the past, interpolated between snapshots.
+
+Because clients send nothing but buttons, there is nothing to cheat with: no positions,
+no "I stomped him". Every outcome is decided on the server.
 
 ```
-                    ┌───────────────────────────┐
-                    │   royale-sim (shared JS)   │
-                    │  apples · bots · branches  │
-                    │  collisions · bullets ·    │
-                    │  kill-line · match FSM     │
-                    └───────────────────────────┘
-                    ╱             │              ╲
-      ┌────────────╱      ┌───────┴───────┐       ╲────────────┐
-      │  SERVER    │      │ ONLINE CLIENT │       │ OFFLINE    │
-      │ authoritative     │ predicts local│       │ CLIENT     │
-      │ N matches, bots,  │ apple, interp │       │ runs core  │
-      │ broadcasts snaps  │ others, recon │       │ solo+bots  │
-      └────────────┘      └───────────────┘       └────────────┘
+             core.js  (plain JS, no Babylon / DOM / ws)
+       apples · branches (seeded) · collisions · scroll · round phases
+        ╱                     │                        ╲
+  OFFLINE (browser)     ONLINE (browser)          SERVER (drawvidverse)
+  core + bots.js,       predicts your apple,      authoritative, 60 Hz,
+  as today              interpolates the rest     bots fill empty seats
 ```
 
-Why this shape: the server stays authoritative, the client logic is **reused** (it
-becomes both the offline mode *and* the client-side predictor), and
-prediction/reconciliation is cheap **because the client predicts with the exact same
-integration code the server runs**.
+## What's already done
 
-## Module split — where today's `royale.js` goes
+Most of the "shared core" the old plan wanted to extract already exists:
 
-| Today (in `royale.js`) | Moves to | Notes |
-|---|---|---|
-| `Apple` locomotion / jump / kinematic landing | **sim core** | pure numeric state `{x,y,vy,facing,alive,armed…}`, no meshes |
-| `Apple._ai` (bot AI) | **sim core** (run server-only) | client never predicts bots — it interpolates them from snapshots |
-| Branch gen / fill / cull, collisions, stomps, bullets, scroll/kill-line, win check | **sim core** | becomes `Match.step(dt, inputs) → events` |
-| `state` machine (countdown / playing / over) + lobby/wait/bot-fill | **sim core** `Match` FSM | new: `waiting` state + `lobbyWaitSeconds` + bot fill |
-| Babylon: models, `RoyaleBranch` visuals, gun/eyes, camera, bg/parallax, HUD | **client renderer** | reads sim state → updates meshes; ~unchanged visually |
-| `InputManager` | **client** | online: send intents; offline: feed core directly |
+- **`bots/sim.js`** is a headless, seeded, fixed-60 Hz port of the round. It is kept
+  identical to `royale.js` and covered by `bots/tools/browser_shape_check.js`.
+- **`bots.js`** (the trained bot) already runs against the core's `world` interface and
+  takes only buttons. The server can run it unchanged.
 
-The renderer keeps ~all the Babylon code; it stops *owning* the simulation and starts
-*reflecting* it.
+## Phases (each one ships on its own and is verifiable)
 
-## Netcode model
+### 1. One core: `royale.js` renders it instead of owning the physics
 
-- **Authoritative:** server runs each match's core at `tickHz`, broadcasts snapshots
-  (apple states + branch rows + bullets + killLine + matchState + events). Bots live
-  only on the server.
-- **Local apple = predicted:** client applies input immediately via the core, keeps a
-  ring buffer of unacked inputs; on each snapshot it snaps the local apple to the
-  server state and **replays** pending inputs (rollback-replay). Small, cheap
-  corrections because prediction == server integration.
-- **Everyone else = interpolated** from snapshots (reuse `../entity-interpolation.js`).
-- **Outcomes** (stomp / elimination / gun pickup / win) are authoritative — shown when
-  the snapshot/event says so.
+The core becomes `core.js`, grown out of `bots/sim.js`. It is loaded by `royale.js`, by
+the bot lab and by the server.
 
-Determinism burden stays tiny: only the local apple's movement must be deterministic
-given inputs. Branch layout must match, so it is **seeded** (server picks the seed per
-match, sends it in the snapshot; every client builds the identical branch field). Bot
-randomness can stay loose (server-only; clients overwrite bots from snapshots).
+- **The core owns** apple movement, charge, pound, the ceiling, collisions,
+  drop-through, the seeded branch layout, scroll and kill line, and the round phases:
+  lobby → countdown → playing → over. It runs in **fixed 1/60 s steps**, driven by an
+  accumulator.
+  - Today `royale.js` steps with the frame's variable dt. Fixed steps also fix "bots get
+    weaker below 60 fps".
+- **`royale.js` keeps** everything you see: models, faces, eyes, squash visuals,
+  shakes, slice bursts, background, trunk, touch UI and HUD. It reads core state each
+  frame and interpolates between the last two core steps, so it stays smooth on
+  120 Hz screens.
+- **The bot lab** imports `core.js`, so `sim.js` shrinks to the evaluation harness. Bot
+  training and the game can never drift apart again.
+- **Verify:**
+  - Offline plays the same as today: feel, bots, difficulty levels, lobby.
+  - Arena numbers are unchanged for the same seeds.
+  - A test runs one input script through the core twice and requires bit-identical
+    results (determinism).
 
-## Lobby lifecycle & bot fill
+This is the biggest step. It is also pure refactoring with no visible change, and
+everything after it gets simpler because of it.
 
-Match FSM per lobby, driven by `config.game`:
+### 2. Server: an `appleroyale` world in drawvidverse
 
-```jsonc
-"game": {
-  "lobbySize": 10,
-  "lobbyWaitSeconds": 20,     // configurable wait
-  "minHumansToStart": 1,
-  "countdownSeconds": 3,
-  "autoRequeue": true
-}
-```
+- **Engine** at `worldserver/src/games/appleroyale/engine.ts` (`IGameLogic`). It holds
+  `matches: Map<id, Match>`, and each Match wraps one core round. This is the same
+  pattern as golf's `matches` map.
+- **Matchmaking:** one button, "Play online", puts you in the open lobby.
+  - The lobby starts when it has 10 humans, or 15 s after the first human arrives.
+    A human alone in the lobby can also hit "start now".
+  - At start, empty seats fill with bots at Hard.
+  - Once a round starts, new arrivals go to the next lobby. After "over", everyone
+    still connected drops into a fresh lobby.
+  - No codes or private rooms in v1.
+- **Disconnect mid-round:** your apple becomes a bot and plays on. There is no
+  reconnect in v1, since rounds last about 60 s: you rejoin the next lobby.
+- **Messages:** custom types through the engine's zod `messages`, not `action`, which
+  is logged on every call.
+  - Client → server:
+    - `{t:'q'}`: queue for a lobby.
+    - `{t:'i', s, m, b}`: input seq, move, button, one per client tick.
+  - Server → client: `{t:'s', …}` per player through `snapshotMessage`, containing only
+    that player's match.
+- **Input handling:** the server keeps a short queue per player and consumes **one
+  input per tick**. If the queue is empty it repeats the last input. If the queue grows
+  past ~6 it drops the oldest, so a laggy client can't fall behind or get ahead.
+  - Inputs are validated by shape only: `m` ∈ {−1, 0, 1}, `b` boolean, `s` increasing.
+  - `transport.maxFramesPerSecond: 90` lets 60 inputs/s through while still capping
+    floods.
+- **Config:** `games/appleroyale.config.json` with:
+  - port **7781**, `tickHz: 60`, `snapshotHz: 20`;
+  - `maxPlayers: 100` for the whole process, and a `game` block with `lobbySize`,
+    `lobbyWaitSeconds`, `botLevel`.
+- **Sharing the core:** `core.js` and `bots.js` are copied from this repo into
+  `worldserver/src/games/appleroyale/vendor/` by a `sync:appleroyale` script.
+  - That directory gets `allowJs`.
+  - A jest test checks the vendored files' hash against a pinned value, so a stale copy
+    fails `npm run check` instead of silently desyncing.
+- **Cost:** the bot lab measures about 10 µs per tick for a full match with 10 bots.
+  60 Hz therefore costs about 0.6 ms of CPU per second per match, so the micro instance
+  can run dozens of matches.
+- **Verify (jest):**
+  - A lobby with 1 human fills with 9 bots after the wait and runs to one winner.
+  - 11 humans split into two matches.
+  - A disconnect hands the apple to a bot.
+  - Garbage or flooding input is ignored.
 
-- Join → assigned to the open **`waiting`** match (create one if none).
-- First human starts the `lobbyWaitSeconds` timer.
-- On timeout **or** 10 humans → **fill remaining slots with bots**, lock, run the
-  3-2-1 countdown → `playing`.
-- Late joiners after lock → next fresh waiting match.
-- Last apple standing → results banner → **auto-requeue** survivors into a new lobby.
-- Human disconnect mid-match → their apple flips to a bot (default) or is eliminated.
+### 3. Online client: show the server's round (no prediction yet)
 
-## How it fits the drawvidverse framework
+- **`net.js`:** a small WebSocket client. It connects, sends `auth`/`join`/`q`, sends
+  one input per tick and buffers snapshots.
+  - It reconnects with backoff from 1 to 8 s, like golf's client.
+- **Branches:** the snapshot carries the match **seed**, and the client builds the
+  identical branch field from the core.
+- **Snapshots:**
+  - Scroll position, phase and timers come straight from the snapshot.
+  - Events (stomp, pound, elimination, win) arrive as a small list in the snapshot and
+    drive the faces, shakes and slice bursts the renderer already has.
+- **Rendering:** every apple, yours included, is drawn ~100 ms in the past,
+  interpolated between snapshots.
+- **Verify:** two browsers in one lobby see the same round, stomps and winner.
+- At this stage your own apple lags by your ping, which is fine on localhost and
+  sluggish over the internet. Phase 4 removes that.
 
-Framework facts that shape the design (verified against the worldserver source):
+### 4. Prediction for your own apple
 
-- One server process = one persistent world. **No built-in lobby/room concept** — the
-  game engine must manage multiple concurrent matches internally.
-- Games plug in via the `IGameLogic` interface
-  (`init / onPlayerJoin / onPlayerLeave / onGameAction / tick(dt) / getSnapshot /
-  shutdown`), registered in `games/index.ts`, configured by `games/<key>.config.json`,
-  and run as their own PM2 process. `clubhouse` / `onlinelounge` are working
-  `physics.engine:"custom"` examples that simulate in their own engine.
-- In the game-logic path, `world.ts` currently calls `getSnapshot()` **once and
-  broadcasts the same blob to every socket** (no interest management). For multiple
-  concurrent matches we want per-player snapshots (see the small hook below).
+- **Prediction:** the client steps **your** apple through the core immediately on each
+  input, and keeps the inputs the server hasn't acknowledged yet.
+- **Reconciliation:** each snapshot carries your apple's full core state plus the last
+  input seq the server applied.
+  - The client resets your apple to that state, replays the pending inputs and blends
+    any visible difference out over ~100 ms.
+  - The core is shared and deterministic, so corrections only appear when another
+    apple touched you.
+- **Collisions:** apple-vs-apple outcomes are **not predicted** in v1. If you land on a
+  head, your bounce shows up when the server confirms it, one round trip later.
+- **Verify:**
+  - Your apple responds instantly, and replay with no other apples produces zero
+    correction.
+  - Play stays good under simulated latency (Chrome throttling at 100 ms and 200 ms).
+  - Measure how late stomps feel at 100 ms.
+  - If stomps feel late, the next step is to predict stomp bounces against the
+    interpolated apples and let the server overrule them. That is a contained change.
 
-## Integration points (files to add / change)
+### 5. Deploy
 
-**drawvidverse (server):**
+- **Server** at `wss://apple-world.drawvid.com`: add the world in the hand-edited
+  places the drawvidverse ROADMAP lists:
+  - PM2 entry in `ecosystem.config.cjs`;
+  - nginx 443 block (setup script and the live box);
+  - Route 53 record in `drawvid-stack.ts`;
+  - certbot with the new host;
+  - the CLAUDE.md world list.
+- **Client:** static hosting for `index.html` + assets (see the open questions). The
+  page falls back to offline if the server is unreachable.
+- **Verify:** a real round between two devices on the public URL, including a phone.
 
-- `games/appleroyale.config.json` — new config, `physics.engine:"custom"`,
-  `worldServer.port:7780`, `maxPlayers` ≈ lobbySize × concurrentMatches, plus the
-  `game` block above.
-- `worldserver/src/games/appleroyale/engine.ts` — new `IGameLogic` = `MatchManager`
-  wrapping the shared core.
-- `worldserver/src/games/index.ts` — register `appleroyale`.
-- **~6-line hook in `world.ts` `sendSnapshots()`**: if the engine exposes
-  `getSnapshotFor(playerId)`, send that per-socket instead of the global blob so each
-  client only receives *its* match. Backward-compatible; falls back to `getSnapshot()`.
-- `tools/scripts/deploy-to-lightsail.sh` (add `appleroyale` to the `pm2 restart` list),
-  `setup-lightsail.sh` (PM2 app on 7780 + nginx block for `world-apple.drawvid.com`),
-  `infra/lib/drawvid-stack.ts` (DNS A record + CloudFront if hosting the frontend there).
+## Snapshot budget (20 Hz, JSON)
 
-**appleroyale (client):**
+- **Size:** each apple is about 60 bytes when sent as a short array with rounded
+  numbers. 10 apples plus header is about 0.7 KB per snapshot, or about 14 KB/s down
+  per player.
+- **Input:** about 25 bytes × 60 per second, about 1.5 KB/s up.
+- **Server:** 100 players come to about 1.4 MB/s out. If needed, `snapshotHz: 15` or
+  dropping unchanged fields cuts that further. There is no binary protocol in v1.
 
-- `sim/` — the shared core (source of truth).
-- `royale.js` → split into `renderer.js` + `net.js`; `index.html` picks mode
-  (`?mode=offline` default-playable single-player; online connects to
-  `wss://world-apple.drawvid.com`).
+## Deliberately left out of v1
 
-**Shared-core plumbing (the one real wrinkle):** the core must reach both repos.
-Recommended: author it in the **appleroyale repo as a plain-JS ES module** (keeps the
-client's zero-build simplicity) and have the worldserver **vendor it** via the deploy
-rsync (same way `games/` configs are already synced); the TS server consumes it with
-`allowJs`. Alternative: author in TS + a small esbuild step for the browser — cleaner
-types, but adds build tooling the client currently lacks.
+These are each additive later, and none of them change the core design:
 
-## Phased plan (each phase independently verifiable)
+- private rooms or invite codes;
+- reconnecting to a round in progress;
+- spectating after you're out (you see the bots and humans finish, as today);
+- predicting collisions;
+- guns (`GUNS_ENABLED` stays off);
+- rankings and accounts.
 
-1. **Extract sim core; wire offline mode to it.**
-   Verify: default / `?mode=offline` plays *identically* to today — same feel, bots,
-   win. Pure refactor, zero behavior change; already delivers "offline vs. bots on the
-   shared code."
-2. **Server engine + matchmaking + bot fill + lobby wait.**
-   Verify: a jest test (mirroring `__tests__/*.game.test.ts`) shows a lobby fills with
-   bots after `lobbyWaitSeconds` and runs to one winner; 11+ players shard into 2 matches.
-3. **Online client: render authoritative snapshots (interpolation only).**
-   Verify: two browsers in one lobby see the same match, eliminations, and winner.
-4. **Prediction + reconciliation for the local apple.**
-   Verify: local apple is instant; corrections small; playable under simulated latency.
-5. **Deploy.** PM2 (7780), nginx `world-apple.drawvid.com`, DNS, frontend hosting.
-   Verify: real multiplayer on a domain.
+## Decisions (2026-11-08)
 
-## Open plumbing decisions (safe defaults exist)
-
-- **Shared-core language/location** — plain-JS-in-appleroyale-vendored-to-server
-  (default, no client build) vs. TS-with-a-bundle-step.
-- **Disconnect handling** — mid-match human becomes a bot (default) vs. instant
-  elimination.
+1. **Host:** `apple-world.drawvid.com` (`wss://apple-world.drawvid.com`).
+2. **Page hosting:** S3 + CloudFront, the same setup as `balls`, in the drawvid CDK stack.
+3. **Online bots:** Hard.
+4. **Lobby wait:** 15 s after the first human. A human alone in the lobby gets
+   "start now".
+5. **Phase 1 (shared core):** yes, first.
