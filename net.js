@@ -1,6 +1,7 @@
 // Online play: a WebSocket to the Apple Royale world (drawvidverse
 // worldserver, games/appleroyale). Speaks its protocol:
-//   → auth, join, q (queue for a lobby), go (start now), i (one step's input)
+//   → auth, join, q (queue for a lobby), go (start now), i (one step's input),
+//     n (rename)
 //   ← welcome, hi (the server's rules fingerprint), s (snapshot, 20/s)
 // See MULTIPLAYER_PLAN.md and the server's games/appleroyale/protocol.ts.
 
@@ -54,6 +55,10 @@
 
     startNow() {
       this._send({ t: "go" });
+    }
+
+    rename(name) {
+      this._send({ t: "n", name });
     }
 
     close(reason) {

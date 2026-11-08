@@ -88,6 +88,15 @@ const BOT_TIERS = [
   { name: "Expert", level: 1 },
 ];
 const DIFFICULTY_KEY = "appleRoyale.difficulty";
+const NAME_KEY = "appleRoyale.name";
+// Bot names, by seat (so every online client agrees).
+const BOT_NAMES = [
+  "Bad Apple", "Granny Smith", "Sir Isaac", "Core Blimey", "Big Apple",
+  "Cider Rider", "Johnny Seed", "Crabby", "Pip Squeak", "Apple Jack",
+];
+
+// A key pressed while typing in the name box.
+const typing = (e) => e.target && e.target.tagName === "INPUT";
 
 // ─── Bark Material ───────────────────────────────────────────────────
 
@@ -123,6 +132,7 @@ class InputManager {
     ]);
 
     window.addEventListener("keydown", (e) => {
+      if (typing(e)) return;
       if (keys.has(e.code)) e.preventDefault();
       this._key(e.code, true);
     });
@@ -134,10 +144,14 @@ class InputManager {
       const code = btn.dataset.code;
       btn.addEventListener("pointerdown", (e) => {
         e.preventDefault();
+        btn.classList.add("down");
         this._key(code, true);
       });
       for (const ev of ["pointerup", "pointercancel", "pointerleave"]) {
-        btn.addEventListener(ev, () => this._key(code, false));
+        btn.addEventListener(ev, () => {
+          btn.classList.remove("down");
+          this._key(code, false);
+        });
       }
     }
     // A touch (or click) anywhere else on the game view is the action button,
@@ -571,6 +585,7 @@ class Game {
     } catch (e) {}
     this.online = null; // online state while connected (see _goOnline)
     window.addEventListener("keydown", (e) => {
+      if (typing(e)) return;
       const m = /^Digit([1-4])$/.exec(e.code);
       if (m) this._setDifficulty(+m[1] - 1);
       if (e.code === "KeyO") this._toggleOnline();
@@ -587,6 +602,22 @@ class Game {
         else if (el.dataset.act === "go") this._startNow();
       });
     }
+
+    // Your name: top right, editable any time; shown under your apple.
+    this.playerName = "";
+    try {
+      this.playerName = localStorage.getItem(NAME_KEY) || "";
+    } catch (e) {}
+    this.nameEl = document.getElementById("name");
+    if (this.nameEl) {
+      this.nameEl.value = this.playerName;
+      this.nameEl.addEventListener("input", () => this._setPlayerName(this.nameEl.value));
+      this.nameEl.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" || e.key === "Escape") this.nameEl.blur();
+      });
+    }
+    this.namesEl = document.getElementById("names");
+    this.labels = []; // name label element per apple view
 
     window.royale = this; // handy for debugging in the console
 
@@ -899,6 +930,7 @@ class Game {
 
     this._updateShake(dt);
     this._updateBgScroll();
+    this._updateLabels();
     this._updateHUD();
   }
 
@@ -997,10 +1029,7 @@ class Game {
   }
 
   _goOnline() {
-    let name = "Apple";
-    try {
-      name = localStorage.getItem("appleRoyale.name") || name;
-    } catch (e) {}
+    const name = this.playerName || "Apple";
     this.online = {
       net: null,
       mirror: null, // the core Round mirroring our match
@@ -1209,6 +1238,7 @@ class Game {
 
     this._updateShake(dt);
     this._updateBgScroll();
+    this._updateLabels();
     this._updateHUD();
   }
 
@@ -1222,35 +1252,16 @@ class Game {
     }
   }
 
-  _updateOnlineHUD() {
+  _onlineStatus() {
     const o = this.online;
-    const touch = matchMedia("(hover: none) and (pointer: coarse)").matches;
-    if (!o.mirror) {
-      this.hud.innerHTML = "Online · finding a lobby…";
-      return;
-    }
+    if (!o.mirror) return "Online · finding a lobby…";
     if (this.state === "lobby") {
-      const others = o.humans - 1;
-      const who = others > 0 ? `${others} other player${others > 1 ? "s" : ""}` : "just you so far";
-      const go = o.humans === 1 ? (touch ? " · tap Start now" : " · G: start now") : "";
-      this.hud.innerHTML =
-        `Online lobby · ${who} · starts in ${o.lobbyLeft}s · empty seats get bots${go}` +
-        `<br><span class="keys" style="opacity:.65">A/D move · SPACE jump (hold: big jump · in air: pound) · O: play offline</span>` +
-        `<span class="taps" style="opacity:.65">◀ ▶ move · tap: jump · hold: big jump · tap in air: pound</span>`;
-      return;
+      const players = `${o.humans} player${o.humans > 1 ? "s" : ""}`;
+      return `Online · ${players} · starts in ${o.lobbyLeft}`;
     }
-    if (this.state === "transition") {
-      this.hud.innerHTML = "Into the tree…";
-      return;
-    }
-    const alive = this.round.apples.filter((a) => a.alive).length;
-    const you = this.round.apples[this.humanIdx];
-    const status = you && !you.alive ? "  ·  you're out — spectating" : "";
-    this.hud.innerHTML =
-      `Online · ${o.humans} player${o.humans > 1 ? "s" : ""} · Alive: ${alive}/${NUM_APPLES}${status}` +
-      `<br><span class="keys" style="opacity:.65">A/D move · SPACE jump (hold: big jump · in air: pound)` +
-      ` · stomp heads to knock rivals down</span>` +
-      `<span class="taps" style="opacity:.65">◀ ▶ move · tap: jump · hold: big jump · tap in air: pound</span>`;
+    if (this.state === "transition") return "Online";
+    const status = this._aliveStatus();
+    return status ? `Online · ${status}` : "Online";
   }
 
   // Start a shake unless a stronger one is still running.
@@ -1332,34 +1343,123 @@ class Game {
       else squash.scaling.set(1, 1, 1);
     });
     engine.runRenderLoop(() => scene.render());
+
+    // The ◀ ▶ buttons are the apple's own left and right leaves (no stem),
+    // rendered once into images when the model has settled.
+    const leaves = inst.rootNodes[0].getChildMeshes(false).find((m) => /leaves/.test(m.name));
+    if (leaves) {
+      let frames = 0;
+      const obs = scene.onAfterRenderObservable.add(() => {
+        if (++frames < 5) return;
+        scene.onAfterRenderObservable.remove(obs);
+        this._renderLeafButtons(engine, scene, leaves);
+      });
+    }
   }
 
+  // Render each half of the leaves mesh (split at its middle, where the stem
+  // is) with a tight orthographic camera into a transparent image, one after
+  // the other (Babylon takes one screenshot at a time).
+  _renderLeafButtons(engine, scene, leaves) {
+    leaves.refreshBoundingInfo(true);
+    const { minimumWorld: min, maximumWorld: max } = leaves.getBoundingInfo().boundingBox;
+    const mid = (min.x + max.x) / 2;
+    const pad = 0.06;
+    const y0 = min.y - pad;
+    const y1 = max.y + pad;
+    const shots = [["ArrowLeft", min.x - pad, mid], ["ArrowRight", mid, max.x + pad]];
+    const shoot = () => {
+      if (!shots.length) return;
+      const [code, x0, x1] = shots.shift();
+      const cx = (x0 + x1) / 2;
+      const cy = (y0 + y1) / 2;
+      const cam = new BABYLON.FreeCamera("leafCam", new V3(cx, cy, -18), scene);
+      cam.setTarget(new V3(cx, cy, 0));
+      cam.mode = BABYLON.Camera.ORTHOGRAPHIC_CAMERA;
+      const hw = (x1 - x0) / 2;
+      const hh = (y1 - y0) / 2;
+      cam.orthoLeft = -hw;
+      cam.orthoRight = hw;
+      cam.orthoTop = hh;
+      cam.orthoBottom = -hh;
+      const h = 256;
+      const size = { width: Math.round((h * hw) / hh), height: h };
+      BABYLON.Tools.CreateScreenshotUsingRenderTarget(
+        engine, cam, size,
+        (data) => {
+          const btn = document.querySelector(`#touch [data-code="${code}"]`);
+          if (btn) btn.innerHTML = `<img alt="" src="${data}">`;
+          cam.dispose();
+          shoot();
+        },
+        "image/png", 4, true, undefined, false, false, false, 1,
+        (tex) => {
+          tex.renderList = [leaves];
+        },
+      );
+    };
+    shoot();
+  }
+
+  _setPlayerName(raw) {
+    this.playerName = raw.trim().slice(0, 16);
+    try {
+      localStorage.setItem(NAME_KEY, this.playerName);
+    } catch (e) {}
+    // Online, tell the server once typing pauses.
+    clearTimeout(this.renameTimer);
+    this.renameTimer = setTimeout(() => {
+      if (this.online) this.online.net.rename(this.playerName || "Apple");
+    }, 400);
+  }
+
+  _nameOf(i) {
+    if (i === this.humanIdx) return this.playerName || "You";
+    const online = this.online && this.online.names && this.online.names[i];
+    return online || BOT_NAMES[i % BOT_NAMES.length];
+  }
+
+  // Each apple's name, centered just under it (HTML over the canvas).
+  _updateLabels() {
+    if (!this.namesEl) return;
+    while (this.labels.length < this.views.length) {
+      const el = document.createElement("div");
+      this.namesEl.appendChild(el);
+      this.labels.push(el);
+    }
+    while (this.labels.length > this.views.length) this.labels.pop().remove();
+    const canvas = this.engine.getRenderingCanvas();
+    const vp = this.camera.viewport.toGlobal(canvas.clientWidth, canvas.clientHeight);
+    const vpm = this.camera.getViewMatrix(true).multiply(this.camera.getProjectionMatrix(true));
+    for (const v of this.views) {
+      const el = this.labels[v.index];
+      const show = v.core.alive;
+      el.style.display = show ? "" : "none";
+      if (!show) continue;
+      const name = this._nameOf(v.index);
+      if (el.textContent !== name) el.textContent = name;
+      const p = BABYLON.Vector3.Project(new V3(v.x, v.y - APPLE_FOOT - 0.1, 0), BABYLON.Matrix.IdentityReadOnly, vpm, vp);
+      const y = Math.min(p.y, canvas.clientHeight - 24); // keep it on screen (the lobby ground is at the very bottom)
+      el.style.transform = `translate(${p.x.toFixed(1)}px, ${y.toFixed(1)}px) translate(-50%, 0)`;
+    }
+  }
+
+  // One short status line, top left.
   _updateHUD() {
     if (!this.hud) return;
-    const tier = BOT_TIERS[this.difficulty].name;
     this._updateBar();
-    if (this.online) return this._updateOnlineHUD();
-    if (this.state === "lobby") {
-      const s = Math.max(0, Math.ceil(this.lobbyTimer));
-      this.hud.innerHTML =
-        `Lobby · round starts in ${s}s · bots: ${tier}` +
-        `<span class="keys" style="opacity:.65"> (1–4 · O: play online)</span>` +
-        `<br><span class="keys" style="opacity:.65">A/D move · SPACE jump (hold: big jump · in air: pound) · roam around</span>` +
-        `<span class="taps" style="opacity:.65">◀ ▶ move · tap: jump · hold: big jump · tap in air: pound</span>`;
-      return;
-    }
-    if (this.state === "transition") {
-      this.hud.innerHTML = "Into the tree…";
-      return;
-    }
-    const alive = this.round.apples.filter((a) => a.alive).length;
+    let text = "";
+    if (this.online) text = this._onlineStatus();
+    else if (this.state === "lobby") text = `Round starts in ${Math.max(0, Math.ceil(this.lobbyTimer))}`;
+    else if (this.state !== "transition") text = this._aliveStatus();
+    if (text !== this.hud.textContent) this.hud.textContent = text;
+  }
+
+  _aliveStatus() {
+    const left = this.round.apples.filter((a) => a.alive).length;
     const you = this.round.apples[this.humanIdx];
-    const status = you && !you.alive ? "  ·  you're out — spectating" : "";
-    this.hud.innerHTML =
-      `Alive: ${alive}/${NUM_APPLES} · ${tier}${status}` +
-      `<br><span class="keys" style="opacity:.65">A/D move · SPACE jump (hold: big jump · in air: pound)` +
-      ` · stomp heads to knock rivals down</span>` +
-      `<span class="taps" style="opacity:.65">◀ ▶ move · tap: jump · hold: big jump · tap in air: pound</span>`;
+    if (this.state === "over") return "";
+    return you && !you.alive ? `You're out · ${left} left` : `${left} apples left`;
   }
 
   // The lobby's buttons (top right): offline, the bot difficulty and "Play

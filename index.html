@@ -5,8 +5,14 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>apple royale</title>
     <style>
+      @font-face {
+        font-family: "DrawvidHand";
+        src: url("assets/fonts/DrawvidHandwriting.woff2") format("woff2");
+        font-display: swap;
+      }
       html,
       body {
+        font-family: "DrawvidHand", "Comic Sans MS", cursive, sans-serif;
         margin: 0;
         padding: 0;
         overflow: hidden;
@@ -25,26 +31,75 @@
         touch-action: none;
         outline: none;
       }
+      /* Game status, top left: one short line. */
       #hud {
         position: absolute;
         top: 12px;
-        left: 12px;
+        left: 14px;
         color: #fff;
-        font: 14px/1.4 monospace;
-        background: rgba(0, 0, 0, 0.35);
-        padding: 6px 10px;
-        border-radius: 4px;
+        font-size: 24px;
+        line-height: 1.2;
+        text-shadow: 0 2px 0 #000, 0 0 6px rgba(0, 0, 0, 0.8);
         pointer-events: none;
         user-select: none;
+      }
+      #hud:empty {
+        display: none;
+      }
+      /* Each apple's name, under it (positioned by royale.js). */
+      #names {
+        position: absolute;
+        inset: 0;
+        overflow: hidden;
+        pointer-events: none;
+      }
+      #names div {
+        position: absolute;
+        left: 0;
+        top: 0;
+        color: #fff;
+        font-size: 18px;
+        white-space: nowrap;
+        text-shadow: 0 2px 0 #000, 0 0 4px #000;
+        transform: translate(-50%, 0);
+        will-change: transform;
+      }
+      /* Top right: your name (editable any time), then the lobby buttons. */
+      #topright {
+        position: absolute;
+        top: 12px;
+        right: 12px;
+        display: flex;
+        flex-direction: column;
+        align-items: flex-end;
+        gap: 8px;
+      }
+      #name {
+        width: 9em;
+        font: inherit;
+        font-size: 18px;
+        color: #fff;
+        text-align: right;
+        background: rgba(0, 0, 0, 0.35);
+        border: 2px solid rgba(255, 255, 255, 0.35);
+        border-radius: 6px;
+        padding: 4px 8px;
+        outline: none;
+        -webkit-user-select: text;
+        user-select: text;
+      }
+      #name:focus {
+        border-color: #fff;
+      }
+      #name::placeholder {
+        color: rgba(255, 255, 255, 0.6);
       }
       /* Bot difficulty labels (lobby only; tap or press 1-4). Not part of
          #hud, which ignores pointers so taps reach the action button. */
       #difficulty {
         display: none;
-        position: absolute;
-        top: 12px;
-        right: 12px;
-        font: 14px/1.4 monospace;
+        font-size: 18px;
+        line-height: 1.2;
         pointer-events: auto;
         user-select: none;
         -webkit-user-select: none;
@@ -63,13 +118,6 @@
         background: rgba(0, 0, 0, 0.65);
         font-weight: 700;
       }
-      @media (max-width: 640px) {
-        /* narrow phones: keep clear of the HUD text, above the touch arrows */
-        #difficulty {
-          top: auto;
-          bottom: calc(var(--pad-h) + 22px + env(safe-area-inset-bottom));
-        }
-      }
       #banner {
         position: absolute;
         top: 36%;
@@ -77,8 +125,9 @@
         right: 0;
         text-align: center;
         color: #fff;
-        font: 700 34px/1.2 system-ui, monospace;
-        text-shadow: 0 2px 10px rgba(0, 0, 0, 0.7);
+        font-size: 44px;
+        line-height: 1.2;
+        text-shadow: 0 3px 0 #000, 0 0 10px rgba(0, 0, 0, 0.7);
         pointer-events: none;
         user-select: none;
         display: none;
@@ -118,8 +167,17 @@
       #touch button:active {
         color: #fff;
       }
-      #touch button[data-code]:active {
-        transform: scale(0.9);
+      /* The arrows are your apple's own leaves (rendered by royale.js);
+         a held one grows a little. */
+      #touch button img {
+        width: 92%;
+        height: 100%;
+        object-fit: contain;
+        transition: transform 80ms ease-out;
+        pointer-events: none;
+      }
+      #touch button.down img {
+        transform: scale(1.1);
       }
       #action {
         position: relative;
@@ -135,26 +193,21 @@
         height: 135%;
         pointer-events: none; /* presses go to the button */
       }
-      #hud .taps {
-        display: none;
-      }
       @media (hover: none) and (pointer: coarse) {
         #touch {
           display: flex;
-        }
-        #hud .keys {
-          display: none;
-        }
-        #hud .taps {
-          display: inline;
         }
       }
     </style>
   </head>
   <body>
     <canvas id="renderCanvas"></canvas>
-    <div id="hud">A/D move &nbsp; SPACE jump (hold: big jump · in air: pound)</div>
-    <div id="difficulty"></div>
+    <div id="names"></div>
+    <div id="hud"></div>
+    <div id="topright">
+      <input id="name" maxlength="16" placeholder="Your name" autocomplete="off" spellcheck="false" aria-label="Your name" />
+      <div id="difficulty"></div>
+    </div>
     <div id="banner"></div>
     <div id="touch">
       <button data-code="ArrowLeft" aria-label="Move left">◀</button>
@@ -166,8 +219,11 @@
 
     <script>
       // Long press: no selection or context menu (some browsers ignore the CSS).
+      // (The name box still takes text.)
       for (const ev of ["selectstart", "contextmenu"]) {
-        document.addEventListener(ev, (e) => e.preventDefault());
+        document.addEventListener(ev, (e) => {
+          if (e.target.tagName !== "INPUT") e.preventDefault();
+        });
       }
     </script>
     <script src="https://cdn.babylonjs.com/babylon.js"></script>
