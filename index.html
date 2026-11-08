@@ -2,7 +2,8 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- maximum-scale: no iOS zoom-in when the name box is focused -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1" />
     <title>apple royale</title>
     <style>
       @font-face {
@@ -20,6 +21,9 @@
         height: 100%;
         /* The visible height: on iOS Safari, 100% runs on under the URL bar. */
         height: 100dvh;
+        /* Pinned: the page never scrolls (iOS scrolls it to show a focused input). */
+        position: fixed;
+        inset: 0;
         background: url("./assets/appletreebg.png") center/cover no-repeat #000;
         /* No long-press text selection, callout menu or tap flash (iOS/Android). */
         -webkit-user-select: none;
@@ -28,6 +32,7 @@
         -webkit-tap-highlight-color: transparent;
       }
       #renderCanvas {
+        display: block;
         width: 100%;
         height: 100%;
         touch-action: none;
@@ -79,10 +84,11 @@
         gap: 8px;
       }
       #name {
-        width: 8em;
+        width: 7em;
         max-width: calc(50vw - 40px);
         font: inherit;
-        font-size: clamp(14px, 3.8vw, 18px);
+        /* 16px at least: iOS zooms the page into any smaller input. */
+        font-size: clamp(16px, 3.8vw, 18px);
         color: #fff;
         text-align: right;
         background: rgba(0, 0, 0, 0.35);
