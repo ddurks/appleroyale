@@ -2,11 +2,13 @@
 
 Headless training ground for Apple Royale bots.
 
-- `sim.js` — port of the royale.js round (physics, charge jump, pound,
-  hull collisions, drop-through, scroll, branch generation). Seeded and
-  deterministic. **Don't change gameplay here**; it must match royale.js.
+- `sim.js` — runs headless rounds on the game core (`../core.js`, the same
+  code the game runs), starting straight in "playing". Seeded and
+  deterministic. Gameplay changes go in `core.js`, never here.
+- `tools/core_check.js` — determinism check: a scripted round must give the
+  same digest every run, in Node and in the browser.
 - `arena.js` — evaluation CLI (`match`, `field`, `ladder`; see its header).
-- `policies/*.js` — bots. `legacy.js` is the AI that shipped in royale.js.
+- `policies/*.js` — bots. `legacy.js` is the AI that once shipped in royale.js.
 - `layouts/*.js` + `layout_arena.js` — alternative branch layouts and their
   referee (`rows.js` is the layout royale.js ships).
 

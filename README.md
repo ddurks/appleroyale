@@ -37,7 +37,9 @@ goes on — stay in frame to stay alive. The top of the screen is a ceiling
   and knocked down. Ground-pound onto a head for a harder knockdown.
 - Faces react: grimace when stomped, yell while pounding, frown near the
   bottom of the screen, "o" while rising, grin near the top.
-- Guns are switched off for now (`GUNS_ENABLED` in `royale.js`).
+- The rules live in `core.js` (no graphics; fixed 1/60 s steps), shared by
+  the game, the bot lab and, later, the multiplayer server. `royale.js`
+  feeds it inputs and draws it.
 - Bot difficulty: **Easy / Normal / Hard / Expert**, picked in the lobby
   (keys **1–4**, or tap the labels; remembered). The bots run the trained
   policy in `bots.js` (see `bots/TIERS.md`).

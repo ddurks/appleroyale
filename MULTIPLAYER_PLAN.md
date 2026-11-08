@@ -1,6 +1,6 @@
 # Apple Royale multiplayer: plan
 
-Status: agreed (2026-11-08); phase 1 in progress. This replaces the August plan, which predates
+Status: agreed (2026-11-08). Phase 1 done; phase 2 next. This replaces the August plan, which predates
 the bot lab. Nothing below is built yet.
 
 Goal: **simple, elegant, robust** online rounds. Up to 10 humans per round, with bots
@@ -43,7 +43,7 @@ Most of the "shared core" the old plan wanted to extract already exists:
 
 ## Phases (each one ships on its own and is verifiable)
 
-### 1. One core: `royale.js` renders it instead of owning the physics
+### 1. One core: `royale.js` renders it instead of owning the physics — DONE
 
 The core becomes `core.js`, grown out of `bots/sim.js`. It is loaded by `royale.js`, by
 the bot lab and by the server.
@@ -181,7 +181,7 @@ These are each additive later, and none of them change the core design:
 - reconnecting to a round in progress;
 - spectating after you're out (you see the bots and humans finish, as today);
 - predicting collisions;
-- guns (`GUNS_ENABLED` stays off);
+- guns (removed from the game in phase 1; in git history before it);
 - rankings and accounts.
 
 ## Decisions (2026-11-08)
