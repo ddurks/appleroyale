@@ -1320,20 +1320,31 @@ class Game {
 
     scene.onBeforeRenderObservable.add(() => {
       const you = this.views[this.humanIdx];
-      if (you && you.core.alive && you.squashNode) squash.scaling.copyFrom(you.squashNode.scaling);
+      if (this.leafShots) squash.scaling.set(1, 1, 1); // hold still for the leaf pictures
+      else if (you && you.core.alive && you.squashNode) squash.scaling.copyFrom(you.squashNode.scaling);
       else squash.scaling.set(1, 1, 1);
     });
     engine.runRenderLoop(() => scene.render());
 
     // The ◀ ▶ buttons are the apple's own left and right leaves (no stem),
-    // rendered once into images when the model has settled.
+    // rendered once into images. They're photographed in a fixed pose (idle
+    // clip paused on its first frame, no squash), so every load gets the
+    // same pictures; the idle carries on afterwards.
     const leaves = inst.rootNodes[0].getChildMeshes(false).find((m) => /leaves/.test(m.name));
     if (leaves) {
+      this.leafShots = true;
+      if (idle) {
+        idle.goToFrame(idle.from);
+        idle.pause();
+      }
       let frames = 0;
       const obs = scene.onAfterRenderObservable.add(() => {
-        if (++frames < 5) return;
+        if (++frames < 3) return; // the frozen pose is drawn (bones updated)
         scene.onAfterRenderObservable.remove(obs);
-        this._renderLeafButtons(engine, scene, leaves);
+        this._renderLeafButtons(engine, scene, leaves, () => {
+          this.leafShots = false;
+          if (idle) idle.play(true);
+        });
       });
     }
   }
@@ -1342,10 +1353,11 @@ class Game {
   // leaves mesh keeping only the triangles on that side of the stem, framed
   // by a tight orthographic camera. One at a time (Babylon takes one
   // screenshot at a time).
-  _renderLeafButtons(engine, scene, leaves) {
+  _renderLeafButtons(engine, scene, leaves, done) {
     leaves.refreshBoundingInfo(true);
     const mid = leaves.getBoundingInfo().boundingBox.centerWorld.x;
-    const pos = leaves.getVerticesData(BABYLON.VertexBuffer.PositionKind);
+    // Positions as drawn: skinned into the current (frozen) pose.
+    const pos = leaves.getPositionData(true, true);
     const idx = leaves.getIndices();
     const toWorld = leaves.getWorldMatrix();
     const world = (i) => {
@@ -1376,7 +1388,7 @@ class Game {
     const shots = [["ArrowLeft", leaf(true)], ["ArrowRight", leaf(false)]];
     let tries = 0;
     const shoot = () => {
-      if (!shots.length) return;
+      if (!shots.length) return done();
       const [code, { m: mesh, min, max }] = shots[0];
       const pad = 0.12 * (max.x - min.x);
       const cx = (min.x + max.x) / 2;
