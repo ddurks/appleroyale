@@ -37,8 +37,10 @@
         top: 12px;
         left: 14px;
         color: #fff;
-        font-size: 24px;
+        /* Scales down on narrow phones so it never reaches the name box. */
+        font-size: clamp(16px, 4.2vw, 24px);
         line-height: 1.2;
+        max-width: calc(50vw - 20px);
         text-shadow: 0 2px 0 #000, 0 0 6px rgba(0, 0, 0, 0.8);
         pointer-events: none;
         user-select: none;
@@ -75,9 +77,10 @@
         gap: 8px;
       }
       #name {
-        width: 9em;
+        width: 8em;
+        max-width: calc(50vw - 40px);
         font: inherit;
-        font-size: 18px;
+        font-size: clamp(14px, 3.8vw, 18px);
         color: #fff;
         text-align: right;
         background: rgba(0, 0, 0, 0.35);
@@ -98,7 +101,9 @@
          #hud, which ignores pointers so taps reach the action button. */
       #difficulty {
         display: none;
-        font-size: 18px;
+        max-width: calc(100vw - 24px);
+        text-align: right;
+        font-size: clamp(13px, 3.6vw, 18px);
         line-height: 1.2;
         pointer-events: auto;
         user-select: none;

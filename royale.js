@@ -1357,44 +1357,72 @@ class Game {
     }
   }
 
-  // Render each half of the leaves mesh (split at its middle, where the stem
-  // is) with a tight orthographic camera into a transparent image, one after
-  // the other (Babylon takes one screenshot at a time).
+  // Render each leaf on its own into a transparent image: a copy of the
+  // leaves mesh keeping only the triangles on that side of the stem, framed
+  // by a tight orthographic camera. One at a time (Babylon takes one
+  // screenshot at a time).
   _renderLeafButtons(engine, scene, leaves) {
     leaves.refreshBoundingInfo(true);
-    const { minimumWorld: min, maximumWorld: max } = leaves.getBoundingInfo().boundingBox;
-    const mid = (min.x + max.x) / 2;
-    const pad = 0.06;
-    const y0 = min.y - pad;
-    const y1 = max.y + pad;
-    const shots = [["ArrowLeft", min.x - pad, mid], ["ArrowRight", mid, max.x + pad]];
+    const mid = leaves.getBoundingInfo().boundingBox.centerWorld.x;
+    const pos = leaves.getVerticesData(BABYLON.VertexBuffer.PositionKind);
+    const idx = leaves.getIndices();
+    const toWorld = leaves.getWorldMatrix();
+    const world = (i) => {
+      const w = new V3();
+      V3.TransformCoordinatesFromFloatsToRef(pos[3 * i], pos[3 * i + 1], pos[3 * i + 2], toWorld, w);
+      return w;
+    };
+    // A mesh of just one side's triangles, and the bounds of what it draws.
+    const leaf = (left) => {
+      const keep = [];
+      const min = new V3(Infinity, Infinity, Infinity);
+      const max = new V3(-Infinity, -Infinity, -Infinity);
+      for (let t = 0; t < idx.length; t += 3) {
+        const p = [world(idx[t]), world(idx[t + 1]), world(idx[t + 2])];
+        if ((p[0].x + p[1].x + p[2].x) / 3 < mid !== left) continue;
+        keep.push(idx[t], idx[t + 1], idx[t + 2]);
+        for (const q of p) {
+          min.minimizeInPlace(q);
+          max.maximizeInPlace(q);
+        }
+      }
+      const m = leaves.clone(left ? "leafL" : "leafR", leaves.parent);
+      m.makeGeometryUnique();
+      m.setIndices(keep);
+      m.setEnabled(false); // only drawn into its screenshot
+      return { m, min, max };
+    };
+    const shots = [["ArrowLeft", leaf(true)], ["ArrowRight", leaf(false)]];
     const shoot = () => {
       if (!shots.length) return;
-      const [code, x0, x1] = shots.shift();
-      const cx = (x0 + x1) / 2;
-      const cy = (y0 + y1) / 2;
+      const [code, { m: mesh, min, max }] = shots.shift();
+      const pad = 0.12 * (max.x - min.x);
+      const cx = (min.x + max.x) / 2;
+      const cy = (min.y + max.y) / 2;
+      const hw = (max.x - min.x) / 2 + pad;
+      const hh = (max.y - min.y) / 2 + pad;
       const cam = new BABYLON.FreeCamera("leafCam", new V3(cx, cy, -18), scene);
       cam.setTarget(new V3(cx, cy, 0));
       cam.mode = BABYLON.Camera.ORTHOGRAPHIC_CAMERA;
-      const hw = (x1 - x0) / 2;
-      const hh = (y1 - y0) / 2;
       cam.orthoLeft = -hw;
       cam.orthoRight = hw;
       cam.orthoTop = hh;
       cam.orthoBottom = -hh;
       const h = 256;
       const size = { width: Math.round((h * hw) / hh), height: h };
+      mesh.setEnabled(true);
       BABYLON.Tools.CreateScreenshotUsingRenderTarget(
         engine, cam, size,
         (data) => {
           const btn = document.querySelector(`#touch [data-code="${code}"]`);
           if (btn) btn.innerHTML = `<img alt="" src="${data}">`;
           cam.dispose();
+          mesh.dispose();
           shoot();
         },
         "image/png", 4, true, undefined, false, false, false, 1,
         (tex) => {
-          tex.renderList = [leaves];
+          tex.renderList = [mesh];
         },
       );
     };
