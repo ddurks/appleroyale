@@ -57,7 +57,7 @@
     SCROLL_ACCEL: 0.08, // units/sec^2
     SCROLL_CATCHUP: 0.85, // rubber-band the floor toward the pack
     SCROLL_SAFE_GAP: 7, // if the lowest apple is this far up, speed the floor up
-    KILL_GRACE: 1.0, // die this far below the bottom of the view
+    KILL_GRACE: 1.1, // die once the whole apple (to its leaf tips, APPLE_TOP) is below the view
     START_FLOOR_Y: -5, // initial floor, well below the start branch
     CAMERA_HALF_HEIGHT: 13, // the shared view: 2× this tall above the floor
 

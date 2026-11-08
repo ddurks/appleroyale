@@ -651,16 +651,13 @@ class Game {
     // Narrow (portrait) screens zoom out until the whole play width fits, so
     // mobile players see every rival. The bottom edge (kill floor / lobby
     // ground) stays anchored at camera.y - CAMERA_HALF_HEIGHT; the extra
-    // height opens upward.
+    // height opens upward. The screen's bottom edge is the floor on every
+    // device (fall completely past it and you're out); on touch screens the
+    // buttons are drawn over the scene.
     const halfW = Math.max(CAMERA_HALF_HEIGHT * aspect, CAM_FOLLOW_EDGE);
     const halfH = halfW / aspect;
-    // The touch bar spans the bottom of the screen: shift the view down by
-    // its height so it sits over the dead zone below the kill floor.
-    const canvas = this.engine.getRenderingCanvas();
-    const barPx = document.getElementById("touch").offsetHeight; // 0 when hidden
-    const pad = (2 * halfH * barPx) / canvas.clientHeight;
-    this.camera.orthoTop = 2 * halfH - CAMERA_HALF_HEIGHT - pad;
-    this.camera.orthoBottom = -CAMERA_HALF_HEIGHT - pad;
+    this.camera.orthoTop = 2 * halfH - CAMERA_HALF_HEIGHT;
+    this.camera.orthoBottom = -CAMERA_HALF_HEIGHT;
     this.camera.orthoLeft = -halfW;
     this.camera.orthoRight = halfW;
     if (this.round) this.round.fillAhead = this._fillAhead();
@@ -1290,16 +1287,18 @@ class Game {
     dir.intensity = 0.4;
     // The model stands 2.54 tall (feet to leaf tips) and 1.78 wide; a full
     // jump stretch (plus spring overshoot) reaches ~3.5 tall.
-    const cam = new BABYLON.FreeCamera("iconCam", new V3(0, 1.75, -18), scene);
-    cam.setTarget(new V3(0, 1.75, 0));
+    // Feet (the model's origin) on the bottom edge, so the apple sits flush
+    // with the bottom of the screen.
+    const cam = new BABYLON.FreeCamera("iconCam", new V3(0, 0, -18), scene);
+    cam.setTarget(new V3(0, 0, 0));
     cam.mode = BABYLON.Camera.ORTHOGRAPHIC_CAMERA;
     const fit = () => {
       engine.resize();
       const aspect = engine.getAspectRatio(cam);
       // Room for the tallest stretch and a stomp squash (1.6× wider + wobble).
       const halfH = Math.max(1.85, 1.6 / aspect);
-      cam.orthoTop = halfH;
-      cam.orthoBottom = -halfH;
+      cam.orthoTop = 2 * halfH - 0.03;
+      cam.orthoBottom = -0.03;
       cam.orthoLeft = -halfH * aspect;
       cam.orthoRight = halfH * aspect;
     };
@@ -1393,12 +1392,14 @@ class Game {
       m.setIndices(tris.flatMap((t) => t.i));
       m.setEnabled(false); // only drawn into its screenshot
       const { min, max } = bounds(tris);
-      return { key: left ? "ArrowLeft" : "ArrowRight", m, min, max, pad: 0.12 * (max.x - min.x), own: true };
+      const pad = 0.12 * (max.x - min.x);
+      // Next to no margin below, so the leaf can sit on the bottom edge.
+      return { key: left ? "ArrowLeft" : "ArrowRight", m, min, max, pad, padBottom: 0.01, own: true };
     };
     const shots = [leaf(true), leaf(false)];
     if (stem) {
       const { min, max } = bounds(triangles(stem));
-      shots.push({ key: "stem", m: stem, min, max, pad: 0.01 });
+      shots.push({ key: "stem", m: stem, min, max, pad: 0.01, padBottom: 0.01 });
     }
     let tries = 0;
     const shoot = () => {
@@ -1407,20 +1408,21 @@ class Game {
         return done();
       }
       const shot = shots[0];
-      const { m: mesh, min, max, pad } = shot;
+      const { m: mesh, min, max, pad, padBottom } = shot;
       const cx = (min.x + max.x) / 2;
       const cy = (min.y + max.y) / 2;
       const hw = (max.x - min.x) / 2 + pad;
-      const hh = (max.y - min.y) / 2 + pad;
+      const top = max.y + pad;
+      const bottom = min.y - padBottom;
       const cam = new BABYLON.FreeCamera("artCam", new V3(cx, cy, -18), scene);
       cam.setTarget(new V3(cx, cy, 0));
       cam.mode = BABYLON.Camera.ORTHOGRAPHIC_CAMERA;
       cam.orthoLeft = -hw;
       cam.orthoRight = hw;
-      cam.orthoTop = hh;
-      cam.orthoBottom = -hh;
+      cam.orthoTop = top - cy;
+      cam.orthoBottom = bottom - cy;
       const h = 256;
-      const size = { width: Math.max(8, Math.round((h * hw) / hh)), height: h };
+      const size = { width: Math.max(8, Math.round((h * 2 * hw) / (top - bottom))), height: h };
       mesh.setEnabled(true);
       BABYLON.Tools.CreateScreenshotUsingRenderTarget(
         engine, cam, size,
@@ -1433,12 +1435,12 @@ class Game {
             return;
           }
           if (shot.key === "stem") {
-            this.stemArt = { url: data, width: 2 * hw, top: max.y + pad };
+            this.stemArt = { url: data, width: 2 * hw, top };
           } else {
             const btn = document.querySelector(`#touch [data-code="${shot.key}"]`);
             if (btn) btn.innerHTML = `<span class="leaf" style="background-image: url(${data})"></span>`;
-            // For the stem: how big a leaf's picture is, in world units.
-            this.leafArt = { width: 2 * hw, height: 2 * hh, cy };
+            // For the stem: a leaf picture's size and the leaf's middle, in world units.
+            this.leafArt = { width: 2 * hw, height: top - bottom, bottom, cy };
           }
           if (shot.own) mesh.dispose();
           shots.shift();
@@ -1466,11 +1468,12 @@ class Game {
     const L = left.getBoundingClientRect();
     const R = right.getBoundingClientRect();
     if (!L.width) return; // touch bar hidden
-    // A leaf's picture is fitted (contain) into its button, then scaled.
+    // A leaf's picture is fitted (contain) into its button on the bottom
+    // edge, then scaled up from the bottom.
     const aspect = this.leafArt.width / this.leafArt.height;
     const shown = Math.min(L.width, L.height * aspect) * LEAF_SCALE;
     const px = shown / this.leafArt.width; // screen px per world unit
-    const leafMidY = (L.top + L.bottom) / 2 - bar.top;
+    const leafMidY = L.bottom - bar.top - (this.leafArt.cy - this.leafArt.bottom) * px;
     const width = this.stemArt.width * px;
     el.style.width = `${width}px`;
     el.style.left = `${(L.right + R.left) / 2 - bar.left - width / 2}px`;
