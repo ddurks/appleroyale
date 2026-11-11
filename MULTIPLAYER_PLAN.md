@@ -15,10 +15,10 @@ There is **one game core** and three places run it:
 - the browser, online, to predict your own apple;
 - the drawvidverse server, which is the authority.
 
-Clients send **only their buttons** (move −1/0/1, action held or not). The server runs
-the round at a fixed 60 Hz and sends back a compact snapshot 20 times a second. Your
+Clients send **only their buttons** (move −1..1, action held or not). The server runs
+the round at a fixed 60 Hz and sends back a compact snapshot 30 times a second. Your
 own apple is predicted locally with the same core and quietly corrected. Everyone else
-is drawn ~100 ms in the past, interpolated between snapshots.
+is drawn ~67 ms in the past, interpolated between snapshots.
 
 Because clients send nothing but buttons, there is nothing to cheat with: no positions,
 no "I stomped him". Every outcome is decided on the server.
@@ -164,14 +164,17 @@ everything after it gets simpler because of it.
   page falls back to offline if the server is unreachable.
 - **Verify:** a real round between two devices on the public URL, including a phone.
 
-## Snapshot budget (20 Hz, JSON)
+## Snapshot budget (30 Hz, JSON)
 
-- **Size:** each apple is about 60 bytes when sent as a short array with rounded
-  numbers. 10 apples plus header is about 0.7 KB per snapshot, or about 14 KB/s down
-  per player.
-- **Input:** about 25 bytes × 60 per second, about 1.5 KB/s up.
-- **Server:** 100 players come to about 1.4 MB/s out. If needed, `snapshotHz: 15` or
-  dropping unchanged fields cuts that further. There is no binary protocol in v1.
+Measured in a round with nine bots:
+
+- **Size:** about 570 bytes per snapshot while you're playing (ten apples as short
+  arrays with rounded numbers, plus your own apple in full for prediction), about
+  330 once you're out. That's about 17 KB/s down per player, 10 KB/s once out.
+- **Left out:** names unless they changed, apples that are out, your full state
+  when you can't move, and values that belong to another phase.
+- **Input:** about 37 bytes × 60 per second, about 2.2 KB/s up.
+- **Server:** 100 players come to about 1.7 MB/s out. There is no binary protocol.
 
 ## Deliberately left out of v1
 

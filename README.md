@@ -64,7 +64,7 @@ title.
   `?server=ws://host:port` overrides, `?lag=100` adds 100 ms each way.
 - `net.js` speaks the protocol; `royale.js` mirrors the server's round in a
   core `Round`, predicts your apple with the core and draws the others
-  100 ms behind, blended between snapshots.
+  67 ms behind, blended between snapshots (30 a second).
 - After changing `core.js` (or the bot), run
   `../drawvidverse/tools/scripts/sync-appleroyale.sh` so the server plays
   by the same rules; its tests fail until you do. A page whose rules differ

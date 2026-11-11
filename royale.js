@@ -41,8 +41,17 @@ const BG_TOP_Y = 170; // tree background extends this high (covers the whole cli
 const GO_BANNER_TIME = 0.6; // "GO!" stays up this long after the countdown
 
 // Online (net.js): other apples are drawn this many steps behind the newest
-// snapshot (100 ms: two snapshot gaps), so there's always one to blend toward.
-const INTERP_STEPS = 6;
+// snapshot (67 ms: two snapshot gaps), so there's always one to blend toward.
+const INTERP_STEPS = 4;
+// The server's message format (its engine.ts PROTOCOL): checked along with
+// the rules, so a page that speaks an older one is told to reload.
+const NET_PROTOCOL = 2;
+// A snapshot's `me` (our apple in full) lists these, in the server's order.
+const ME_FIELDS = [
+  "alive", "x", "y", "vx", "vy", "grounded", "coyote", "jumpBuffer", "jumpWindup",
+  "_pendingJump", "bounceVx", "facing", "pounding", "poundHang", "charging", "charge",
+  "dropThrough", "squish", "squishV", "squishHold", "button",
+];
 const CORRECTION_DECAY = 12; // 1/s: how fast a prediction correction is eased out
 
 // Bottom edge of both canopy layers, in world units above BG_BOTTOM_Y: one big
@@ -603,13 +612,15 @@ function setFromSnapshot(a, q, p = q, f = 1) {
   a.jumpWindup = 0;
 }
 
-// Online: the server's full state of our apple (branches by id).
+// Online: the server's full state of our apple: ME_FIELDS in order (true/false
+// as 1/0), then its standing and pass branches by id.
 function applyFullState(a, st, round) {
   const byId = (id) => (id === null ? null : round.branches.find((b) => b.id === id) || null);
-  for (const k in st) {
-    if (k === "standingBranch" || k === "passBranch") a[k] = byId(st[k]);
-    else a[k] = st[k];
-  }
+  ME_FIELDS.forEach((k, i) => {
+    a[k] = typeof a[k] === "boolean" ? !!st[i] : st[i];
+  });
+  a.standingBranch = byId(st[ME_FIELDS.length]);
+  a.passBranch = byId(st[ME_FIELDS.length + 1]);
 }
 
 // ─── TitleScreen ─────────────────────────────────────────────────────
@@ -1540,7 +1551,7 @@ class Game {
     this.online = {
       net: null,
       mirror: null, // the core Round mirroring our match
-      rules: APPLE_CORE.rulesDigest(),
+      rules: `${APPLE_CORE.rulesDigest()}.${NET_PROTOCOL}`,
       snaps: [], // recent snapshots, oldest first
       renderK: 0, // the (fractional) server step others are drawn at
       events: [], // not yet shown: [id, step, type, ...]
@@ -1578,6 +1589,7 @@ class Game {
     o.mirror.startLobby();
     o.snaps = [];
     o.events = [];
+    o.lastEvent = 0; // event ids start again with each match
     o.pending = [];
     o.renderK = s.k - INTERP_STEPS;
     this.round = o.mirror;
@@ -1592,6 +1604,10 @@ class Game {
   _onSnapshot(s) {
     const o = this.online;
     if (!o || s.k === undefined) return; // not in a match yet
+    // What a snapshot leaves out: values that only matter in another phase.
+    s.tt ??= s.ph === "lobby" ? 0 : 1;
+    s.cd ??= 0;
+    s.w ??= -1;
     if (!o.mirror || s.seed !== o.mirror.seed) this._newMirror(s);
     const m = o.mirror;
     // New seats (humans arriving, bots at the start) join while it's a lobby.
@@ -1608,16 +1624,22 @@ class Game {
 
     o.snaps.push(s);
     if (o.snaps.length > 40) o.snaps.shift();
-    o.humans = s.n.filter((n) => n).length;
+    if (s.n) {
+      // Sent with a match's first snapshot and when they change.
+      o.names = s.n;
+      o.humans = s.n.filter((n) => n).length;
+    }
     o.lobbyLeft = s.lt;
-    o.names = s.n;
-    for (const e of s.ev) if (e[0] > o.lastEvent) o.events.push(e);
-    if (s.ev.length) o.lastEvent = s.ev[s.ev.length - 1][0];
+    for (const e of s.ev || []) {
+      if (e[0] > o.lastEvent) o.events.push(e);
+      o.lastEvent = Math.max(o.lastEvent, e[0]);
+    }
 
     // Reconcile: take the server's state of our apple at the last input it
     // applied, then replay the inputs it hasn't seen yet.
     o.pending = o.pending.filter((p) => p.s > s.ack);
     const me = m.apples[s.you];
+    if (me && s.a[s.you] === 0) me.alive = false; // we're out: no more `me` to say so
     if (me && s.me && this._predicting()) {
       const bx = me.x;
       const by = me.y;
@@ -1698,9 +1720,10 @@ class Game {
     const predicting = this._predicting();
     for (const a of m.apples) {
       if (a.index === this.humanIdx && predicting) continue;
-      const p = s0.a[a.index] || s1.a[a.index];
-      const q = s1.a[a.index] || p;
+      const q = s1.a[a.index];
+      if (q === 0) a.alive = false; // out: the server stops sending it
       if (!q) continue;
+      const p = s0.a[a.index] || q;
       this.views[a.index].savePrev();
       setFromSnapshot(a, q, p, f);
     }
