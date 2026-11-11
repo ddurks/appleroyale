@@ -90,10 +90,10 @@ const BOT_TIERS = [
 const DIFFICULTY_KEY = "appleRoyale.difficulty";
 const NAME_KEY = "appleRoyale.name";
 const TILT_KEY = "appleRoyale.tilt";
-// Tilt steering: lean past TILT_ON degrees to move, back under TILT_OFF to
-// stop (the gap keeps a lean near the edge from flickering).
-const TILT_ON = 10;
-const TILT_OFF = 6;
+// Tilt steering is proportional: no move inside TILT_DEAD degrees, then
+// faster with the lean until full speed at TILT_FULL.
+const TILT_DEAD = 2;
+const TILT_FULL = 18;
 const isTouch = () => matchMedia("(hover: none) and (pointer: coarse)").matches;
 
 // iOS only lets a page read the tilt after asking, and only from a tap.
@@ -136,7 +136,7 @@ class InputManager {
     // Tilt steering (a lobby option on touch screens): leaning the phone
     // left or right moves you, in place of the leaf arrows.
     this.tilt = false;
-    this.tiltMove = 0; // -1 | 0 | 1 from the last reading
+    this.tiltMove = 0; // -1..1 from the last reading
     window.addEventListener("deviceorientation", (e) => this._onTilt(e));
 
     const keys = new Set([
@@ -212,7 +212,8 @@ class InputManager {
     const angle = (screen.orientation ? screen.orientation.angle : window.orientation) || 0;
     // Degrees leaning right, whichever way up the screen is.
     const lean = angle === 90 ? e.beta : angle === 270 || angle === -90 ? -e.beta : angle === 180 ? -e.gamma : e.gamma;
-    this.tiltMove = Math.abs(lean) > (this.tiltMove ? TILT_OFF : TILT_ON) ? Math.sign(lean) : 0;
+    const f = (Math.abs(lean) - TILT_DEAD) / (TILT_FULL - TILT_DEAD);
+    this.tiltMove = Math.sign(lean) * Math.min(Math.max(f, 0), 1);
   }
 
   // One step's input for the core. The action button counts as held this

@@ -3,7 +3,8 @@
 // it), the bot lab (bots/sim.js) and, later, the multiplayer server.
 //
 // Everything advances in fixed steps of C.DT. Each apple is driven by an
-// input { move: -1 | 0 | 1, button: boolean } (button = held); a press is the
+// input { move: -1..1, button: boolean } (move: a fraction of full speed,
+// rightward; button = held); a press is the
 // button going false→true, a release true→false. Randomness comes only from
 // the round's seed (branch layout) — bots bring their own rng.
 //
@@ -202,7 +203,8 @@
       // it ground-pounds, except just after leaving a branch (coyote), where
       // it still jumps. ──
       const inp = live ? input || NO_INPUT : NO_INPUT;
-      const m = inp.move > 0 ? 1 : inp.move < 0 ? -1 : 0;
+      // Clamped (and anything that isn't a number reads as 0).
+      const m = inp.move > 0 ? Math.min(+inp.move, 1) : inp.move < 0 ? Math.max(+inp.move, -1) : 0;
       let vx = m * C.MOVE_SPEED;
       const btn = !!inp.button;
       const jumpPress = btn && !this.button;
