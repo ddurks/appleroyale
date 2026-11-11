@@ -422,7 +422,6 @@
     <!-- The engine, from npm (`npm install`; deploy.sh uploads these files). -->
     <script src="node_modules/babylonjs/babylon.js"></script>
     <script src="node_modules/babylonjs-loaders/babylonjs.loaders.min.js"></script>
-    <script src="node_modules/@babylonjs/havok/lib/umd/HavokPhysics_umd.js"></script>
     <script src="sliceBurst.js"></script>
     <script src="core.js"></script>
     <script src="net.js"></script>
@@ -433,10 +432,15 @@
       //   ?demo=3d      → 3D rolling sphere demo (game2.js)
       const params = new URLSearchParams(window.location.search);
       const demo = params.get("demo");
-      const gameScript = document.createElement("script");
-      gameScript.src =
-        demo === "3d" ? "game2.js" : demo === "classic" ? "game.js" : "royale.js";
-      document.body.appendChild(gameScript);
+      // Only the demos run on the physics engine (Havok).
+      const havok = "node_modules/@babylonjs/havok/lib/umd/HavokPhysics_umd.js";
+      const scripts = demo === "3d" ? [havok, "game2.js"] : demo === "classic" ? [havok, "game.js"] : ["royale.js"];
+      for (const src of scripts) {
+        const el = document.createElement("script");
+        el.src = src;
+        el.async = false; // in order
+        document.body.appendChild(el);
+      }
     </script>
   </body>
 </html>

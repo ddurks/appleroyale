@@ -552,6 +552,7 @@ class AppleView {
         upMax: 5.5,
         planarDir: new V3(Math.random() - 0.5, 0, 0),
         planarJitter: 0.9,
+        gravity: SCENE_GRAVITY,
       });
     }
   }
@@ -1194,9 +1195,6 @@ class Game {
     hemi.intensity = 0.95;
     const dir = new BABYLON.DirectionalLight("dir", new V3(-0.5, -1, 0.3), scene);
     dir.intensity = 0.4;
-
-    const hk = await HavokPhysics();
-    scene.enablePhysics(new V3(0, SCENE_GRAVITY, 0), new BABYLON.HavokPlugin(true, hk));
 
     this.camera = new BABYLON.FreeCamera("cam", new V3(0, 0, -18), scene);
     this.camera.setTarget(new V3(0, 0, 0));
