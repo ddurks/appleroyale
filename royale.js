@@ -98,6 +98,25 @@ const TITLE_FACE_HOLD = 1.1;
 // down to the lobby, over DESCENT_TIME seconds.
 const CROWN_SCREENS = 2;
 const DESCENT_TIME = 2.6;
+// The logo's apple comes along (TitleScreen.drop): it squashes and shrinks
+// to game size, hops, rides down the screen and lands as the camera
+// settles, bounces twice (heights in world units, durations in seconds)
+// and becomes your apple.
+const DROP_SHRINK = 0.35;
+const DROP_HOP = 0.07; // of the view's height
+const DROP_SLAM = 0.35; // the last part of the ride, falling to the ground
+const DROP_BOUNCES = [[1.5, 0.42], [0.45, 0.24]];
+const DROP_SETTLE = 0.16;
+const DROP_END = DESCENT_TIME + DROP_BOUNCES.reduce((t, b) => t + b[1], 0) + DROP_SETTLE;
+// Clouds in that sky (Clouds): BIGCORP's atlas (assets/clouds.png, 1024×240,
+// white shapes whose brightness is the alpha), each cloud's [x, y, w, h].
+const CLOUD_RECTS = [
+  [0, 0, 212, 136], [214, 0, 241, 117], [457, 0, 191, 115], [650, 0, 158, 114], [810, 0, 199, 105],
+  [0, 138, 284, 102], [286, 138, 174, 100], [462, 138, 304, 70], [768, 138, 105, 51], [875, 138, 102, 51],
+];
+const CLOUD_COUNT = 10;
+const CLOUD_W = [2.5, 9]; // world-unit widths, farthest (lowest) to nearest (highest)
+const CLOUD_SPEED = [0.35, 1.5]; // units/s, likewise
 const NAME_KEY = "appleRoyale.name";
 const TILT_KEY = "appleRoyale.tilt";
 // Tilt steering is proportional: no move inside TILT_DEAD degrees, then
@@ -660,6 +679,83 @@ class TitleScreen {
     }
   }
 
+  // Ready the apple to leave the logo: where it is, and how big.
+  startDrop() {
+    const n = this.apple.node;
+    this.drop = { x0: n.position.x, y0: n.position.y, k0: n.scaling.y, off0: 0, prevY: null, face: null };
+  }
+
+  // The apple t seconds into the fall, given the camera's height now, at
+  // the launch and at the end, and where your apple stands (feet). Squash
+  // s > 0 is flat and wide, s < 0 tall and thin, pivoting on the feet as
+  // AppleView's does.
+  dropFrame(t, dt, camY, camYAtLaunch, camYEnd, land, viewH) {
+    const d = this.drop;
+    const n = this.apple.node;
+    let x, y, k, s;
+    let face = "default";
+    if (t < DROP_SHRINK) {
+      // Shrink to game size, crouching for the jump.
+      const f = t / DROP_SHRINK;
+      const e = f * f * (3 - 2 * f);
+      x = d.x0;
+      y = d.y0;
+      k = d.k0 + (1 - d.k0) * e;
+      s = 0.4 * f * f;
+    } else if (t < DESCENT_TIME) {
+      // Ride down with the camera, holding its place on the screen (a hop
+      // first), then fall the rest of the way to where your apple stands,
+      // faster and faster, landing as the camera settles.
+      if (!d.launched) {
+        d.launched = true;
+        d.off0 = d.y0 - camYAtLaunch;
+        if (this.idle) this.idle.stop();
+      }
+      const u = (t - DROP_SHRINK) / (DESCENT_TIME - DROP_SHRINK);
+      const off1 = land.y - camYEnd;
+      const hop = u < 0.35 ? DROP_HOP * viewH * Math.sin((Math.PI * u) / 0.35) : 0;
+      const slam = Math.max(0, (u - (1 - DROP_SLAM)) / DROP_SLAM);
+      const off = d.off0 + (off1 - d.off0) * slam * slam + hop;
+      const ux = u * u * (3 - 2 * u);
+      x = d.x0 + (land.x - d.x0) * ux;
+      y = camY + off;
+      k = 1;
+      // Stretched by how fast it's really falling.
+      const v = d.prevY === null ? 0 : (y - d.prevY) / Math.max(dt, 1e-3);
+      d.prevY = y;
+      s = -Math.min(0.32, 0.02 * Math.abs(v));
+      face = v > 0 ? "o" : "woah";
+    } else {
+      // Landed: two bounces, a squash at each touchdown, then settle.
+      let tc = DESCENT_TIME; // the last touchdown
+      let h = 0;
+      let amp = 0.55;
+      let air = 0;
+      for (const [bh, bd] of DROP_BOUNCES) {
+        if (t < tc + bd) {
+          const v = (t - tc) / bd;
+          h = 4 * bh * v * (1 - v);
+          air = 1 - 2 * v; // rising +1 … falling -1
+          break;
+        }
+        tc += bd;
+        amp *= 0.55;
+      }
+      x = land.x;
+      y = land.y + h;
+      k = 1;
+      const since = t - tc;
+      s = amp * Math.exp(-since / 0.09) - (h > 0 ? 0.12 * Math.abs(air) : 0);
+      face = t - DESCENT_TIME < 0.22 ? "grimace" : "elated";
+    }
+    n.position.set(x, y, 0);
+    n.scaling.set(k * (1 + 0.6 * s), k * (1 - 0.7 * s), k * (1 + 0.6 * s));
+    if (face !== d.face) {
+      d.face = face;
+      this._setFace(face === "default" ? null : face);
+    }
+  }
+
   _setFace(name) {
     if (name) this.lastFace = name;
     this.face = name;
@@ -688,6 +784,86 @@ class TitleScreen {
     const k = (s * w.h * TITLE_APPLE_H) / this.apple.h;
     this.apple.node.scaling.setAll(k);
     this.apple.node.position.set(cam.position.x, blockTop - s * tall - k * (this.apple.mid - this.apple.h / 2), 0);
+  }
+}
+
+// ─── Clouds ──────────────────────────────────────────────────────────
+// The sky above the treetop, on the title and the fall from it: clouds
+// drifting left to right. Lower ones are farther away (smaller, slower,
+// behind); higher ones nearer (bigger, faster, in front). One that leaves on
+// the right comes back off the left at a new height, shape and facing.
+
+class Clouds {
+  constructor(game) {
+    this.game = game;
+    const scene = game.scene;
+    const tex = new BABYLON.Texture("./assets/clouds.png", scene);
+    tex.getAlphaFromRGB = true;
+    tex.wrapU = tex.wrapV = BABYLON.Texture.CLAMP_ADDRESSMODE;
+    const mat = new BABYLON.StandardMaterial("cloudMat", scene);
+    mat.emissiveColor = new BABYLON.Color3(1, 1, 1);
+    mat.disableLighting = true;
+    mat.opacityTexture = tex;
+    mat.backFaceCulling = false; // a mirrored cloud is a flipped plane
+    this.clouds = [];
+    for (let i = 0; i < CLOUD_COUNT; i++) {
+      const mesh = BABYLON.MeshBuilder.CreatePlane(`cloud${i}`, { size: 1, updatable: true }, scene);
+      mesh.material = mat;
+      mesh.isPickable = false;
+      this.clouds.push({ mesh, w: 0, speed: 0 });
+    }
+    this.show(false);
+  }
+
+  show(on) {
+    for (const c of this.clouds) c.mesh.setEnabled(on);
+  }
+
+  // A fresh sky, clouds anywhere across the view.
+  scatter() {
+    const { left, right } = this._band();
+    for (const c of this.clouds) this._spawn(c, left + Math.random() * (right - left));
+  }
+
+  update(dt) {
+    const { left, right } = this._band();
+    for (const c of this.clouds) {
+      c.mesh.position.x += c.speed * dt;
+      if (c.mesh.position.x - c.w / 2 > right) this._spawn(c, null, left);
+    }
+  }
+
+  // The view's sides, and the sky from the treetop to the top of the title's
+  // view (fixed to the treetop, so the fall carries it away).
+  _band() {
+    const cam = this.game.camera;
+    const bottom = this.game.crown.position.y;
+    return {
+      left: cam.position.x + cam.orthoLeft,
+      right: cam.position.x + cam.orthoRight,
+      bottom,
+      top: bottom + 1 + cam.orthoTop - cam.orthoBottom,
+    };
+  }
+
+  // A new cloud at x (or just off the left edge): random nearness, which
+  // sets its height, size, speed and depth; random shape and facing.
+  _spawn(c, x, left) {
+    const band = this._band();
+    const near = Math.random();
+    const [rx, ry, rw, rh] = CLOUD_RECTS[Math.floor(Math.random() * CLOUD_RECTS.length)];
+    const w = CLOUD_W[0] + (CLOUD_W[1] - CLOUD_W[0]) * near;
+    const h = (w * rh) / rw;
+    const u0 = rx / 1024, u1 = (rx + rw) / 1024;
+    const vTop = 1 - ry / 240, vBot = 1 - (ry + rh) / 240;
+    c.mesh.updateVerticesData(BABYLON.VertexBuffer.UVKind, [u0, vBot, u1, vBot, u1, vTop, u0, vTop]);
+    c.mesh.scaling.set(Math.random() < 0.5 ? -w : w, h, 1);
+    c.w = w;
+    c.speed = (CLOUD_SPEED[0] + (CLOUD_SPEED[1] - CLOUD_SPEED[0]) * near) * (0.9 + 0.2 * Math.random());
+    // Clear of the treetop at the bottom and the view's top edge.
+    const lo = band.bottom + h / 2 + 0.5;
+    const hi = Math.max(lo, band.top - h / 2 - 0.5);
+    c.mesh.position.set(x ?? left - w / 2 - Math.random() * 3, lo + (hi - lo) * near, 19 - near); // the treetop is at z 20
   }
 }
 
@@ -839,6 +1015,8 @@ class Game {
     document.body.classList.remove("falling");
     this._placeCrown();
     this.crown.setEnabled(true);
+    this.clouds.scatter();
+    this.clouds.show(true);
     this.titleScreen.show(true);
     document.body.classList.add("titlescreen");
     document.getElementById("titlemsg").textContent = message || "";
@@ -898,10 +1076,19 @@ class Game {
 
   // From the title: fall to the lobby's view, leaving the logo in the sky.
   _beginDescent(fromY) {
-    this.descent = { t: 0, from: fromY };
+    this.descent = { t: 0, from: fromY, launchY: fromY };
     document.body.classList.add("falling"); // name labels wait for the landing
     this.titleScreen.show(true);
+    this.titleScreen.startDrop();
     this.crown.setEnabled(true);
+  }
+
+  // Where your apple stands (feet), for the logo's apple to land on. Online
+  // before a match is found: the middle of the ground.
+  _landingSpot() {
+    const v = this.views[this.humanIdx];
+    if (!v) return { x: 0, y: LOBBY_GROUND_Y - 0.58 };
+    return { x: v.core.x, y: v.core.y - APPLE_FOOT };
   }
 
   // The camera's height while falling from the title (null when not). The
@@ -910,17 +1097,29 @@ class Game {
     const d = this.descent;
     if (!d) return null;
     d.t += dt;
+    this.clouds.update(dt);
     const to = LOBBY_CAM_Y - this._lobbyDrop("lobby", 0);
-    if (d.t >= DESCENT_TIME) {
+    // Your apple is the logo's until it lands.
+    const you = this.views[this.humanIdx];
+    if (d.t >= DROP_END) {
       this.descent = null;
       document.body.classList.remove("falling");
       this.titleScreen.show(false);
       this.crown.setEnabled(false);
+      this.clouds.show(false);
+      if (you) you.mesh.setEnabled(true);
       return to;
     }
-    const f = d.t / DESCENT_TIME;
-    const ease = f < 0.5 ? 4 * f * f * f : 1 - Math.pow(-2 * f + 2, 3) / 2;
-    return d.from + (to - d.from) * ease;
+    if (you) you.mesh.setEnabled(false);
+    const camAt = (t) => {
+      const f = Math.min(t / DESCENT_TIME, 1);
+      const ease = f < 0.5 ? 4 * f * f * f : 1 - Math.pow(-2 * f + 2, 3) / 2;
+      return d.from + (to - d.from) * ease;
+    };
+    const camY = camAt(d.t);
+    const viewH = this.camera.orthoTop - this.camera.orthoBottom;
+    this.titleScreen.dropFrame(d.t, dt, camY, camAt(DROP_SHRINK), to, this._landingSpot(), viewH);
+    return camY;
   }
 
   // Local or Online, from the title: into that lobby.
@@ -1056,6 +1255,7 @@ class Game {
 
     this.titleScreen = new TitleScreen(this, titleWords);
     this._buildCrown();
+    this.clouds = new Clouds(this);
     this._showTitle();
   }
 
@@ -1200,6 +1400,7 @@ class Game {
     this.t += dt;
     if (this.state === "title") {
       this._placeCrown(); // the view's size may have changed
+      this.clouds.update(dt);
       this.titleScreen.update(dt);
       return;
     }
@@ -1213,9 +1414,8 @@ class Game {
       return;
     }
 
-    // Step the core in fixed steps; draw in between. The lobby waits for
-    // the fall from the title to land.
-    this.acc = fallY === null ? Math.min(this.acc + dt, 0.25) : 0;
+    // Step the core in fixed steps; draw in between.
+    this.acc = Math.min(this.acc + dt, 0.25);
     while (this.acc >= DT && this.state !== "over") {
       this.acc -= DT;
       this._tick();
@@ -1253,11 +1453,13 @@ class Game {
     for (const bv of this.branchViews.values()) bv.savePrev();
     this.prevCamY = r.cameraY;
 
-    if (this.state === "lobby") {
+    // The lobby's countdown waits for the fall from the title to land, and
+    // you can't move till then.
+    if (this.state === "lobby" && !this.descent) {
       this.lobbyTimer -= DT;
       if (this.lobbyTimer <= 0) this._beginTransition();
     }
-    const yours = this.input.sample();
+    const yours = this.descent ? { move: 0, button: false } : this.input.sample();
     const events = r.step((a) => {
       const brain = this.brains[a.index];
       return brain ? brain(a) : yours;
