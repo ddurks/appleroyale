@@ -426,21 +426,6 @@
     <script src="core.js"></script>
     <script src="net.js"></script>
     <script src="bots.js"></script>
-    <script>
-      // Default: multiplayer royale. Old demos stay reachable:
-      //   ?demo=classic → single-player branch platformer (game.js)
-      //   ?demo=3d      → 3D rolling sphere demo (game2.js)
-      const params = new URLSearchParams(window.location.search);
-      const demo = params.get("demo");
-      // Only the demos run on the physics engine (Havok).
-      const havok = "node_modules/@babylonjs/havok/lib/umd/HavokPhysics_umd.js";
-      const scripts = demo === "3d" ? [havok, "game2.js"] : demo === "classic" ? [havok, "game.js"] : ["royale.js"];
-      for (const src of scripts) {
-        const el = document.createElement("script");
-        el.src = src;
-        el.async = false; // in order
-        document.body.appendChild(el);
-      }
-    </script>
+    <script src="royale.js"></script>
   </body>
 </html>

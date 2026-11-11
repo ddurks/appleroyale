@@ -1,6 +1,6 @@
 # Apple Royale
 
-A 2.5D platformer built with Babylon.js and Havok physics. Jump between breaking branches as an apple.
+A 2.5D battle royale of apples, drawn with Babylon.js. Jump between branches as the screen scrolls up; last apple standing wins.
 
 ## Run
 
@@ -11,15 +11,9 @@ npx serve . -l 3000
 
 Open http://localhost:3000
 
-The page loads the engine (Babylon.js, its loaders, Havok) from
+The page loads the engine (Babylon.js and its loaders) from
 `node_modules`, and `./deploy.sh` uploads those files compressed. To move to
 the newest engine: `npm update`, try the game, deploy.
-
-## Modes
-
-- Multiplayer royale (default): http://localhost:3000
-- 2.5D branch platformer (original): http://localhost:3000/?demo=classic
-- 3D rolling platformer: http://localhost:3000/?demo=3d
 
 ## Royale
 
