@@ -211,6 +211,11 @@
       #touch button.down .leaf {
         transform: scale(1.32); /* 1.1× when held */
       }
+      /* Tilt steering on: the leaf arrows (and their stem) go; the apple stays. */
+      body.tilt #touch [data-code],
+      body.tilt #stem {
+        visibility: hidden;
+      }
       /* ?debug: the sizes the browser is really using (phone layout checks). */
       #debug {
         position: absolute;

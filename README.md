@@ -32,6 +32,9 @@ goes on — stay in frame to stay alive. The top of the screen is a ceiling
   (the action button, which squishes along with you). Touching anywhere
   else on the game view is also the action button (and restarts). Portrait
   phones zoom out so the whole field is visible.
+- **Tilt** (lobby toggle, touch screens only; remembered): lean the phone
+  left/right to move instead of the arrows. Tap anywhere for the action.
+  Needs https (iOS asks permission on the toggle tap).
 - Bounce into another apple → you bounce off each other.
 - Land on another apple's **head** → you bounce up and they get squished flat
   and knocked down. Ground-pound onto a head for a harder knockdown.

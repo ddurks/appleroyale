@@ -89,6 +89,19 @@ const BOT_TIERS = [
 ];
 const DIFFICULTY_KEY = "appleRoyale.difficulty";
 const NAME_KEY = "appleRoyale.name";
+const TILT_KEY = "appleRoyale.tilt";
+// Tilt steering: lean past TILT_ON degrees to move, back under TILT_OFF to
+// stop (the gap keeps a lean near the edge from flickering).
+const TILT_ON = 10;
+const TILT_OFF = 6;
+const isTouch = () => matchMedia("(hover: none) and (pointer: coarse)").matches;
+
+// iOS only lets a page read the tilt after asking, and only from a tap.
+function askTilt() {
+  const D = window.DeviceOrientationEvent;
+  if (!D || typeof D.requestPermission !== "function") return Promise.resolve(true);
+  return D.requestPermission().then((r) => r === "granted", () => false);
+}
 const LEAF_SCALE = 1.2; // the leaf buttons' drawn size vs their button (index.html .leaf)
 // Bot names, by seat (so every online client agrees).
 const BOT_NAMES = [
@@ -120,6 +133,11 @@ class InputManager {
     this._jumpReq = false;
     this._jumpHeld = false;
     this._restartReq = false;
+    // Tilt steering (a lobby option on touch screens): leaning the phone
+    // left or right moves you, in place of the leaf arrows.
+    this.tilt = false;
+    this.tiltMove = 0; // -1 | 0 | 1 from the last reading
+    window.addEventListener("deviceorientation", (e) => this._onTilt(e));
 
     const keys = new Set([
       "ArrowLeft",
@@ -189,13 +207,22 @@ class InputManager {
     if (code === "KeyR" && down) this._restartReq = true;
   }
 
+  _onTilt(e) {
+    if (e.gamma === null) return;
+    const angle = (screen.orientation ? screen.orientation.angle : window.orientation) || 0;
+    // Degrees leaning right, whichever way up the screen is.
+    const lean = angle === 90 ? e.beta : angle === 270 || angle === -90 ? -e.beta : angle === 180 ? -e.gamma : e.gamma;
+    this.tiltMove = Math.abs(lean) > (this.tiltMove ? TILT_OFF : TILT_ON) ? Math.sign(lean) : 0;
+  }
+
   // One step's input for the core. The action button counts as held this
   // step if it was pressed since the last one, so a tap shorter than a step
   // still registers (as a press, then a release next step).
   sample() {
     const button = this._jumpHeld || this._jumpReq;
     this._jumpReq = false;
-    return { move: (this.right ? 1 : 0) - (this.left ? 1 : 0), button };
+    const keys = (this.right ? 1 : 0) - (this.left ? 1 : 0);
+    return { move: keys || (this.tilt ? this.tiltMove : 0), button };
   }
   consumeRestart() {
     const v = this._restartReq;
@@ -601,8 +628,17 @@ class Game {
         if (el.dataset.tier) this._setDifficulty(+el.dataset.tier);
         else if (el.dataset.act === "online") this._toggleOnline();
         else if (el.dataset.act === "go") this._startNow();
+        else if (el.dataset.act === "tilt") this._setTilt(!this.input.tilt);
       });
     }
+
+    // Tilt, if it was on last time. iOS asks again on the first tap.
+    try {
+      if (localStorage.getItem(TILT_KEY) && isTouch()) {
+        this._applyTilt(true);
+        window.addEventListener("touchend", () => askTilt().then((ok) => ok || this._applyTilt(false)), { once: true });
+      }
+    } catch (e) {}
 
     // Your name: top right, editable any time; shown under your apple.
     this.playerName = "";
@@ -642,6 +678,21 @@ class Game {
     this.difficulty = i;
     try {
       localStorage.setItem(DIFFICULTY_KEY, String(i));
+    } catch (e) {}
+  }
+
+  _setTilt(on) {
+    if (on) askTilt().then((ok) => this._applyTilt(ok));
+    else this._applyTilt(false);
+  }
+
+  // With tilt on the leaf arrows hide (index.html body.tilt); tapping
+  // anywhere is still the action button.
+  _applyTilt(on) {
+    this.input.tilt = on;
+    document.body.classList.toggle("tilt", on);
+    try {
+      localStorage.setItem(TILT_KEY, on ? "1" : "");
     } catch (e) {}
   }
 
@@ -1572,6 +1623,7 @@ class Game {
         BOT_TIERS.map((t, i) => `<span data-tier="${i}"${i === this.difficulty ? ' class="on"' : ""}>${t.name}</span>`).join("") +
         `<span data-act="online">Play online</span>`;
     }
+    if (this.state === "lobby" && isTouch()) html += `<span data-act="tilt"${this.input.tilt ? ' class="on"' : ""}>Tilt</span>`;
     if (html !== this.barHtml) {
       this.barHtml = html;
       this.diffEl.innerHTML = html;
