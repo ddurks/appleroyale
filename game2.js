@@ -737,7 +737,7 @@ class DemoWorld {
   _buildMaterials() {
     this.groundMat = new BABYLON.StandardMaterial("groundMat", this.scene);
     const groundTex = new BABYLON.Texture(
-      "./assets/appletreebg.png",
+      "./assets/appletreebg.webp",
       this.scene,
       false,
       true,
@@ -773,7 +773,7 @@ class DemoWorld {
     skyboxMat.diffuseColor = BABYLON.Color3.Black();
     skyboxMat.specularColor = BABYLON.Color3.Black();
 
-    const skyFaces = new Array(6).fill("./assets/appletreebg.png");
+    const skyFaces = new Array(6).fill("./assets/appletreebg.webp");
     const skyTex = BABYLON.CubeTexture.CreateFromImages(skyFaces, this.scene);
     skyTex.coordinatesMode = BABYLON.Texture.SKYBOX_MODE;
     skyTex.level = 1.08;

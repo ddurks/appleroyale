@@ -784,9 +784,9 @@ class Game {
 
     // ── Background ───────────────────────────────────────────────────
 
-    // Full-screen background: appletreebg.png (square), covers viewport
+    // Full-screen background: appletreebg.webp (square), covers viewport
     const bgTex = new BABYLON.Texture(
-      "./assets/appletreebg.png",
+      "./assets/appletreebg.webp",
       scene,
       false,
       true,
@@ -797,9 +797,9 @@ class Game {
     );
     this.bgTex = bgTex;
 
-    // Mid layer: appletree.png — world-space, just behind gameplay, alpha transparent
+    // Mid layer: appletree.webp — world-space, just behind gameplay, alpha transparent
     const treeTex = new BABYLON.Texture(
-      "./assets/appletree.png",
+      "./assets/appletree.webp",
       scene,
       false,
       true,

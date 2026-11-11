@@ -5,10 +5,15 @@ A 2.5D platformer built with Babylon.js and Havok physics. Jump between breaking
 ## Run
 
 ```
+npm install
 npx serve . -l 3000
 ```
 
 Open http://localhost:3000
+
+The page loads the engine (Babylon.js, its loaders, Havok) from
+`node_modules`, and `./deploy.sh` uploads those files compressed. To move to
+the newest engine: `npm update`, try the game, deploy.
 
 ## Modes
 

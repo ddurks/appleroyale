@@ -1206,7 +1206,7 @@ class Game {
 
     // Background (screen-locked) and mid tree layer (parallax-scrolled)
     const bgTex = new BABYLON.Texture(
-      "./assets/appletreebg.png",
+      "./assets/appletreebg.webp",
       scene,
       false,
       true,
@@ -1216,7 +1216,7 @@ class Game {
     this.bgTex = bgTex;
 
     const treeTex = new BABYLON.Texture(
-      "./assets/appletree.png",
+      "./assets/appletree.webp",
       scene,
       false,
       true,
