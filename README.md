@@ -32,9 +32,9 @@ goes on — stay in frame to stay alive. The top of the screen is a ceiling
   (the action button, which squishes along with you). Touching anywhere
   else on the game view is also the action button (and restarts). Portrait
   phones zoom out so the whole field is visible.
-- **Tilt** (lobby toggle, touch screens only; remembered): lean the phone
-  left/right to move instead of the arrows. Tap anywhere for the action.
-  Needs https (iOS asks permission on the toggle tap).
+- **Tilt** (title screen, touch screens only): lean the phone left/right
+  to move instead of the arrows, faster the further you lean. Tap anywhere
+  for the action. Needs https (iOS asks permission when you pick it).
 - Bounce into another apple → you bounce off each other.
 - Land on another apple's **head** → you bounce up and they get squished flat
   and knocked down. Ground-pound onto a head for a harder knockdown.
@@ -43,17 +43,21 @@ goes on — stay in frame to stay alive. The top of the screen is a ceiling
 - The rules live in `core.js` (no graphics; fixed 1/60 s steps), shared by
   the game, the bot lab and the multiplayer server. `royale.js` feeds it
   inputs and draws it.
-- Bot difficulty: **Easy / Normal / Hard / Expert**, picked in the lobby
-  (keys **1–4**, or tap the labels; remembered). The bots run the trained
-  policy in `bots.js` (see `bots/TIERS.md`).
+- The title screen: **Local** (vs bots; **Enter**) or **Online** (**O**),
+  bot difficulty **Easy / Normal / Hard** (keys **1–3**) and, on touch
+  screens, controls **Buttons / Tilt**; both remembered. **Menu** (or
+  **Esc**) in a lobby goes back. The 3D title is `assets/title.glb`, built
+  from the font by `tools/title_glb.py` (see its header). The bots run
+  the trained policy in `bots.js` (see `bots/TIERS.md`).
 
 ## Online
 
-Offline vs bots is the default. In the lobby, **Play online** (or **O**)
+**Online** on the title screen
 joins a lobby on the server: other players walk around with you, and the
 round starts when it's full, 15 s after the first player arrives, or when a
 lone player hits **Start now** (**G**). Empty seats get bots (Hard). After
-each round you're dropped into the next lobby; **Play offline** goes back.
+each round you're dropped into the next lobby; **Menu** goes back to the
+title.
 
 - Server: the `appleroyale` world in `../drawvidverse` (port 7781;
   `npm run dev:appleroyale` there). On localhost the page connects to

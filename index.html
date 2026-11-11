@@ -115,9 +115,9 @@
       #name::placeholder {
         color: rgba(255, 255, 255, 0.6);
       }
-      /* Bot difficulty labels (lobby only; tap or press 1-4). Not part of
-         #hud, which ignores pointers so taps reach the action button. */
-      #difficulty {
+      /* The lobby's buttons ("Menu", "Start now"). Not part of #hud, which
+         ignores pointers so taps reach the action button. */
+      #bar {
         display: none;
         max-width: calc(100vw - 24px);
         text-align: right;
@@ -127,7 +127,7 @@
         user-select: none;
         -webkit-user-select: none;
       }
-      #difficulty span {
+      #bar span {
         display: inline-block;
         margin-left: 4px;
         padding: 6px 8px;
@@ -136,7 +136,7 @@
         background: rgba(0, 0, 0, 0.35);
         cursor: pointer;
       }
-      #difficulty span.on {
+      #bar span.on {
         color: #fff;
         background: rgba(0, 0, 0, 0.65);
         font-weight: 700;
@@ -154,6 +154,81 @@
         pointer-events: none;
         user-select: none;
         display: none;
+      }
+      /* The title menu, under the 3D logo (royale.js TitleScreen): the two
+         play buttons, then two radio groups of one choice each (bots, and
+         controls on touch screens). */
+      #title {
+        display: none;
+        position: absolute;
+        left: 50%;
+        bottom: 20px;
+        transform: translateX(-50%);
+        width: min(420px, calc(100vw - 32px));
+        flex-direction: column;
+        gap: 12px;
+        user-select: none;
+        -webkit-user-select: none;
+      }
+      body.titlescreen #title {
+        display: flex;
+      }
+      body.titlescreen #touch,
+      body.falling #names {
+        visibility: hidden;
+      }
+      #titlemsg {
+        margin: 0;
+        text-align: center;
+        color: #fff;
+        font-size: 18px;
+        text-shadow: 0 2px 0 #000, 0 0 6px rgba(0, 0, 0, 0.8);
+      }
+      #titlemsg:empty {
+        display: none;
+      }
+      #title .play {
+        display: flex;
+        gap: 12px;
+      }
+      #title .play button {
+        flex: 1;
+        font: inherit;
+        font-size: clamp(26px, 7vw, 34px);
+        color: #fff;
+        background: #d8262b;
+        border: 3px solid #2a1208;
+        border-radius: 14px;
+        padding: 8px 0 6px;
+        box-shadow: 0 5px 0 #2a1208;
+        text-shadow: 0 2px 0 rgba(0, 0, 0, 0.35);
+        cursor: pointer;
+      }
+      #title .play button:active {
+        transform: translateY(4px);
+        box-shadow: 0 1px 0 #2a1208;
+      }
+      #title .radio {
+        display: flex;
+        gap: 4px;
+        padding: 4px;
+        border-radius: 12px;
+        background: rgba(0, 0, 0, 0.4);
+      }
+      #title .radio button {
+        flex: 1;
+        font: inherit;
+        font-size: clamp(17px, 4.6vw, 21px);
+        color: rgba(255, 255, 255, 0.75);
+        background: none;
+        border: 0;
+        border-radius: 8px;
+        padding: 6px 0 4px;
+        cursor: pointer;
+      }
+      #title .radio button[aria-checked="true"] {
+        color: #2a1208;
+        background: #fff;
       }
       /* Touch controls — touch devices only: three equal buttons across the
          bottom (◀ ▶ and the action apple). A touch anywhere else on the game
@@ -257,9 +332,18 @@
     <div id="hud"></div>
     <div id="topright">
       <input id="name" maxlength="16" placeholder="Your name" autocomplete="off" spellcheck="false" aria-label="Your name" />
-      <div id="difficulty"></div>
+      <div id="bar"></div>
     </div>
     <div id="banner"></div>
+    <div id="title">
+      <p id="titlemsg"></p>
+      <div class="play">
+        <button data-act="local">Local</button>
+        <button data-act="online">Online</button>
+      </div>
+      <div class="radio" id="tiers" role="radiogroup" aria-label="Bots"></div>
+      <div class="radio" id="controls" role="radiogroup" aria-label="Controls"></div>
+    </div>
     <div id="touch">
       <!-- Filled with your apple's leaves and stem once they're rendered (royale.js). -->
       <div id="stem"></div>

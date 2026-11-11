@@ -85,9 +85,19 @@ const BOT_TIERS = [
   { name: "Easy", level: 0 },
   { name: "Normal", level: 0.3 },
   { name: "Hard", level: 0.6 },
-  { name: "Expert", level: 1 },
 ];
 const DIFFICULTY_KEY = "appleRoyale.difficulty";
+// Title screen (TitleScreen): the logo's words swell this much as the apple
+// rises in its idle, and the apple pulls a face every so often.
+const TITLE_PULSE = 0.06;
+const TITLE_APPLE_H = 0.75; // the apple's height, in the words' heights
+const TITLE_FACE_EVERY = 2.2; // seconds between faces (±40%)
+const TITLE_FACE_HOLD = 1.1;
+// Leaving the title, the camera falls from the sky past the treetop (its
+// crown sits CROWN_SCREENS screens of canopy above the lobby's view) and
+// down to the lobby, over DESCENT_TIME seconds.
+const CROWN_SCREENS = 2;
+const DESCENT_TIME = 2.6;
 const NAME_KEY = "appleRoyale.name";
 const TILT_KEY = "appleRoyale.tilt";
 // Tilt steering is proportional: no move inside TILT_DEAD degrees, then
@@ -582,6 +592,105 @@ function applyFullState(a, st, round) {
   }
 }
 
+// ─── TitleScreen ─────────────────────────────────────────────────────
+// The logo: "apple royale" in 3D (assets/title.glb, made by
+// tools/title_glb.py from the Drawvid Hand font) over an idling apple. The
+// words swell as the apple rises in its idle, and the apple pulls a face now
+// and then. The menu under it is HTML (index.html #title).
+
+class TitleScreen {
+  constructor(game, wordsContainer) {
+    this.game = game;
+    const scene = game.scene;
+    this.root = new BABYLON.TransformNode("title", scene);
+    const part = (name, container) => {
+      const node = new BABYLON.TransformNode(name, scene);
+      node.parent = this.root;
+      const inst = container.instantiateModelsToScene((n) => `${name}_${n}`, false);
+      inst.rootNodes[0].parent = node;
+      for (const m of node.getChildMeshes(false)) {
+        m.renderingGroupId = 2;
+        m.isPickable = false;
+        m.computeWorldMatrix(true);
+      }
+      const { min, max } = node.getHierarchyBoundingVectors();
+      return { node, inst, w: max.x - min.x, h: max.y - min.y, mid: (max.y + min.y) / 2 };
+    };
+    this.words = part("titleWords", wordsContainer);
+    this.words.node.rotation.y = Math.PI; // the export faces away from our camera
+    this.apple = part("titleApple", game.appleContainer);
+
+    // Its own face material, as in AppleView.attachModel.
+    const faceMesh = this.apple.node.getChildMeshes(false).find((m) => /_face$/.test(m.name));
+    this.faceMat = faceMesh.material.clone("titleFace");
+    faceMesh.material = this.faceMat;
+    this.faceDefault = this.faceMat.albedoTexture || this.faceMat.diffuseTexture;
+    this.face = null; // the face being pulled, or null for the default
+    this.faceT = TITLE_FACE_EVERY;
+
+    for (const ag of this.apple.inst.animationGroups) ag.stop();
+    this.idle = this.apple.inst.animationGroups.find((ag) => ag.name.toLowerCase().includes("idle"));
+    this.scale = 1;
+    this.show(false);
+  }
+
+  show(on) {
+    this.root.setEnabled(on);
+    if (!this.idle) return;
+    if (on) this.idle.start(true, 2);
+    else this.idle.stop();
+  }
+
+  update(dt) {
+    this._layout();
+    // Where the apple is in its idle: 0 standing tall, ½ crouched lowest.
+    const a = this.idle && this.idle.animatables[0];
+    const phase = a ? (a.masterFrame - this.idle.from) / (this.idle.to - this.idle.from) : 0;
+    this.words.node.scaling.setAll(this.scale * (1 + TITLE_PULSE * Math.cos(2 * Math.PI * phase)));
+
+    this.faceT -= dt;
+    if (this.faceT > 0) return;
+    if (this.face) {
+      this._setFace(null);
+      this.faceT = TITLE_FACE_EVERY * (0.6 + 0.8 * Math.random());
+    } else {
+      const others = FACE_NAMES.filter((f) => f !== this.lastFace);
+      this._setFace(others[Math.floor(Math.random() * others.length)]);
+      this.faceT = TITLE_FACE_HOLD;
+    }
+  }
+
+  _setFace(name) {
+    if (name) this.lastFace = name;
+    this.face = name;
+    const tex = name ? this.game.faceTextures[name] : this.faceDefault;
+    if (this.faceMat.albedoTexture !== undefined) this.faceMat.albedoTexture = tex;
+    else this.faceMat.diffuseTexture = tex;
+  }
+
+  // Fit the logo (words, a gap, the apple) between the name box and the menu,
+  // as big as the screen allows.
+  _layout() {
+    const cam = this.game.camera;
+    const canvas = this.game.engine.getRenderingCanvas();
+    const box = canvas.getBoundingClientRect();
+    const perPx = (cam.orthoTop - cam.orthoBottom) / box.height;
+    const menuTop = document.getElementById("title").getBoundingClientRect().top - box.top;
+    const top = cam.position.y + cam.orthoTop - 64 * perPx;
+    const bottom = cam.position.y + cam.orthoTop - (menuTop - 16) * perPx;
+    const w = this.words;
+    const tall = w.h * (1 + TITLE_PULSE) + w.h * (0.08 + TITLE_APPLE_H);
+    const s = Math.max(0, Math.min((0.9 * (cam.orthoRight - cam.orthoLeft)) / (w.w * (1 + TITLE_PULSE)), (top - bottom) / tall));
+    this.scale = s;
+    const blockTop = (top + bottom) / 2 + (s * tall) / 2;
+    const wordsMid = blockTop - (s * w.h * (1 + TITLE_PULSE)) / 2;
+    w.node.position.set(cam.position.x, wordsMid - s * w.mid, 0);
+    const k = (s * w.h * TITLE_APPLE_H) / this.apple.h;
+    this.apple.node.scaling.setAll(k);
+    this.apple.node.position.set(cam.position.x, blockTop - s * tall - k * (this.apple.mid - this.apple.h / 2), 0);
+  }
+}
+
 // ─── Game ────────────────────────────────────────────────────────────
 
 class Game {
@@ -615,23 +724,31 @@ class Game {
     this.online = null; // online state while connected (see _goOnline)
     window.addEventListener("keydown", (e) => {
       if (typing(e)) return;
-      const m = /^Digit([1-4])$/.exec(e.code);
-      if (m) this._setDifficulty(+m[1] - 1);
-      if (e.code === "KeyO") this._toggleOnline();
+      if (this.state === "title") {
+        const m = /^Digit([1-3])$/.exec(e.code);
+        if (m) this._setDifficulty(+m[1] - 1);
+        if (e.code === "Enter" || e.code === "KeyL") this._play(false);
+        if (e.code === "KeyO") this._play(true);
+      } else if (e.code === "Escape") this._menu();
       if (e.code === "KeyG") this._startNow();
     });
-    // Touch/click labels: their own element (the canvas is the action button).
-    this.diffEl = document.getElementById("difficulty");
-    if (this.diffEl) {
-      this.diffEl.addEventListener("click", (e) => {
-        const el = e.target.closest("[data-tier], [data-act]");
-        if (!el) return;
-        if (el.dataset.tier) this._setDifficulty(+el.dataset.tier);
-        else if (el.dataset.act === "online") this._toggleOnline();
-        else if (el.dataset.act === "go") this._startNow();
-        else if (el.dataset.act === "tilt") this._setTilt(!this.input.tilt);
-      });
-    }
+    // The title menu: Local / Online, and one choice each of bots and controls.
+    document.getElementById("title").addEventListener("click", (e) => {
+      const el = e.target.closest("[data-tier], [data-ctl], [data-act]");
+      if (!el || this.state !== "title") return;
+      if (el.dataset.tier) this._setDifficulty(+el.dataset.tier);
+      else if (el.dataset.ctl) this._setTilt(el.dataset.ctl === "tilt");
+      else this._play(el.dataset.act === "online");
+    });
+    // The lobby's buttons, top right: their own element (the canvas is the
+    // action button).
+    this.barEl = document.getElementById("bar");
+    this.barEl.addEventListener("click", (e) => {
+      const el = e.target.closest("[data-act]");
+      if (!el) return;
+      if (el.dataset.act === "menu") this._menu();
+      else if (el.dataset.act === "go") this._startNow();
+    });
 
     // Tilt, if it was on last time. iOS asks again on the first tap.
     try {
@@ -675,11 +792,12 @@ class Game {
   }
 
   _setDifficulty(i) {
-    if (this.online || this.state !== "lobby" || !BOT_TIERS[i]) return;
+    if (this.state !== "title" || !BOT_TIERS[i]) return;
     this.difficulty = i;
     try {
       localStorage.setItem(DIFFICULTY_KEY, String(i));
     } catch (e) {}
+    this._renderTitleMenu();
   }
 
   _setTilt(on) {
@@ -695,6 +813,136 @@ class Game {
     try {
       localStorage.setItem(TILT_KEY, on ? "1" : "");
     } catch (e) {}
+    this._renderTitleMenu();
+  }
+
+  // The title menu's radio groups, showing the current choices. Controls
+  // only on touch screens.
+  _renderTitleMenu() {
+    const radio = (attr, opts, on) =>
+      opts.map(([v, label]) => `<button data-${attr}="${v}" role="radio" aria-checked="${v === on}">${label}</button>`).join("");
+    document.getElementById("tiers").innerHTML = radio("tier", BOT_TIERS.map((t, i) => [String(i), t.name]), String(this.difficulty));
+    const ctl = document.getElementById("controls");
+    ctl.style.display = isTouch() ? "" : "none";
+    ctl.innerHTML = radio("ctl", [["buttons", "Buttons"], ["tilt", "Tilt"]], this.input.tilt ? "tilt" : "buttons");
+  }
+
+  // ── Title ──────────────────────────────────────────────────────────
+
+  // The title screen: plain sky (no round, no scenery). A message (why
+  // online play ended) shows above the menu.
+  _showTitle(message) {
+    this._clearRound();
+    this.round = null;
+    this.state = "title";
+    this.descent = null;
+    document.body.classList.remove("falling");
+    this._placeCrown();
+    this.crown.setEnabled(true);
+    this.titleScreen.show(true);
+    document.body.classList.add("titlescreen");
+    document.getElementById("titlemsg").textContent = message || "";
+    this._renderTitleMenu();
+    this.setBanner("");
+    this._updateHUD();
+  }
+
+  _hideTitle() {
+    this.titleScreen.show(false);
+    document.body.classList.remove("titlescreen");
+  }
+
+  // The treetop: a sky-coloured cover over the tree layers whose bottom edge
+  // is the canopy's scalloped arc upside down (highest over the trunk). It
+  // only stands during the title and the fall from it, so the climb in a
+  // round never meets it.
+  _buildCrown() {
+    const width = 220;
+    const N = Math.round(width * 8) + 2;
+    const positions = [];
+    const indices = [];
+    for (let i = 0; i <= N; i++) {
+      const x = -width / 2 + (i / N) * width;
+      positions.push(x, 400, 0, x, -canopyEdge(x), 0);
+    }
+    for (let i = 0; i < N; i++) {
+      const a = i * 2;
+      indices.push(a, a + 2, a + 1, a + 1, a + 2, a + 3);
+    }
+    const crown = new BABYLON.Mesh("crown", this.scene);
+    const vd = new BABYLON.VertexData();
+    vd.positions = positions;
+    vd.indices = indices;
+    vd.applyToMesh(crown);
+    const mat = new BABYLON.StandardMaterial("crownMat", this.scene);
+    const sky = this.scene.clearColor;
+    mat.emissiveColor = new BABYLON.Color3(sky.r, sky.g, sky.b);
+    mat.disableLighting = true;
+    mat.backFaceCulling = false;
+    crown.material = mat;
+    crown.position.z = 20; // in front of the tree layer (22) and the far canopy (~40)
+    crown.isPickable = false;
+    crown.setEnabled(false);
+    this.crown = crown;
+  }
+
+  // The crown CROWN_SCREENS screens above the top of the lobby's view, and
+  // the title's camera just clear of it, all sky.
+  _placeCrown() {
+    const cam = this.camera;
+    const viewH = cam.orthoTop - cam.orthoBottom;
+    this.crown.position.y = LOBBY_CAM_Y + cam.orthoTop + CROWN_SCREENS * viewH;
+    cam.position.set(0, this.crown.position.y - cam.orthoBottom + 1, -18);
+    this._updateBgScroll();
+  }
+
+  // From the title: fall to the lobby's view, leaving the logo in the sky.
+  _beginDescent(fromY) {
+    this.descent = { t: 0, from: fromY };
+    document.body.classList.add("falling"); // name labels wait for the landing
+    this.titleScreen.show(true);
+    this.crown.setEnabled(true);
+  }
+
+  // The camera's height while falling from the title (null when not). The
+  // end is the lobby's view, wherever that is this frame.
+  _advanceDescent(dt) {
+    const d = this.descent;
+    if (!d) return null;
+    d.t += dt;
+    const to = LOBBY_CAM_Y - this._lobbyDrop("lobby", 0);
+    if (d.t >= DESCENT_TIME) {
+      this.descent = null;
+      document.body.classList.remove("falling");
+      this.titleScreen.show(false);
+      this.crown.setEnabled(false);
+      return to;
+    }
+    const f = d.t / DESCENT_TIME;
+    const ease = f < 0.5 ? 4 * f * f * f : 1 - Math.pow(-2 * f + 2, 3) / 2;
+    return d.from + (to - d.from) * ease;
+  }
+
+  // Local or Online, from the title: into that lobby.
+  _play(online) {
+    this.input.sample(); // drop taps made on the title
+    const fromY = this.camera.position.y;
+    if (online) {
+      this._hideTitle();
+      this.state = "lobby"; // the server's lobby, once one is found (_newMirror)
+      this._buildLobby(); // the ground to land on meanwhile
+      this._goOnline();
+      this._updateHUD();
+    } else {
+      this._startLobby();
+    }
+    this._beginDescent(fromY);
+  }
+
+  // Back to the title (from a lobby, or the end of an offline round).
+  _menu() {
+    if (this.online) this._goOffline();
+    else if (this.state === "lobby" || this.state === "over") this._showTitle();
   }
 
   _updateOrtho() {
@@ -787,6 +1035,7 @@ class Game {
       "apple.glb",
       scene,
     );
+    const titleWords = await BABYLON.SceneLoader.LoadAssetContainerAsync("./assets/", "title.glb", scene);
     this._initActionIcon();
     this.faceTextures = {};
     for (const name of FACE_NAMES) {
@@ -805,19 +1054,26 @@ class Game {
       for (const v of this.views) v.updateEyes(dt);
     });
 
-    this._startLobby();
+    this.titleScreen = new TitleScreen(this, titleWords);
+    this._buildCrown();
+    this._showTitle();
   }
 
 
   // ── Lobby ──────────────────────────────────────────────────────────
 
-  _startLobby() {
-    // Tear down the previous round / lobby
+  // Tear down the previous round / lobby.
+  _clearRound() {
     this._disposeLobby();
     for (const v of this.views) v.dispose();
     for (const bv of this.branchViews.values()) bv.dispose();
     this.views = [];
     this.branchViews.clear();
+  }
+
+  _startLobby() {
+    this._hideTitle();
+    this._clearRound();
 
     this.round = new Round({ seed: (Math.random() * 2 ** 32) >>> 0, fillAhead: this._fillAhead() });
     this.state = "lobby";
@@ -942,17 +1198,24 @@ class Game {
   _update(dt) {
     if (this.state === "loading") return;
     this.t += dt;
+    if (this.state === "title") {
+      this._placeCrown(); // the view's size may have changed
+      this.titleScreen.update(dt);
+      return;
+    }
+    const fallY = this._advanceDescent(dt);
     // Take last frame's shake off so the camera follow sees the steady camera.
     this.camera.position.x -= this.shakeOff.x;
     this.camera.position.y -= this.shakeOff.y;
     this.shakeOff.x = this.shakeOff.y = 0;
     if (this.online) {
-      this._updateOnline(dt);
+      this._updateOnline(dt, fallY);
       return;
     }
 
-    // Step the core in fixed steps; draw in between.
-    this.acc = Math.min(this.acc + dt, 0.25);
+    // Step the core in fixed steps; draw in between. The lobby waits for
+    // the fall from the title to land.
+    this.acc = fallY === null ? Math.min(this.acc + dt, 0.25) : 0;
     while (this.acc >= DT && this.state !== "over") {
       this.acc -= DT;
       this._tick();
@@ -965,7 +1228,7 @@ class Game {
     }
 
     const r = this.round;
-    this.camera.position.y = this.prevCamY + (r.cameraY - this.prevCamY) * alpha - this._lobbyDrop(r.phase, r.transT);
+    this.camera.position.y = fallY ?? this.prevCamY + (r.cameraY - this.prevCamY) * alpha - this._lobbyDrop(r.phase, r.transT);
     this.ceilingY = r.scrollY + VIEW_HEIGHT; // the core's ceiling (+ the apple's top)
     for (const v of this.views) v.render(dt, alpha);
     this._syncBranches(alpha);
@@ -1068,11 +1331,6 @@ class Game {
   // same phases), predict our own apple with the core, and draw everyone
   // else INTERP_STEPS behind the newest snapshot, blended between two.
 
-  _toggleOnline() {
-    if (this.online) this._goOffline();
-    else if (this.state === "lobby") this._goOnline();
-  }
-
   _startNow() {
     if (this.online && this.online.mirror && this.state === "lobby") this.online.net.startNow();
   }
@@ -1109,18 +1367,13 @@ class Game {
     o.net.close();
     this.input.consumeRestart(); // a press from online doesn't restart offline
     this.humanIdx = Math.floor(NUM_APPLES / 2);
-    this._startLobby();
-    if (message) this.setBanner(message);
+    this._showTitle(message);
   }
 
   // A fresh match (or our first): a mirror round in its lobby, lobby scenery.
   _newMirror(s) {
     const o = this.online;
-    this._disposeLobby();
-    for (const v of this.views) v.dispose();
-    for (const bv of this.branchViews.values()) bv.dispose();
-    this.views = [];
-    this.branchViews.clear();
+    this._clearRound();
     o.mirror = new Round({ seed: s.seed, fillAhead: this._fillAhead() });
     o.mirror.startLobby();
     o.snaps = [];
@@ -1198,9 +1451,11 @@ class Game {
     return i === this.humanIdx ? "You" : (this.online.names && this.online.names[i]) || "Bot " + i;
   }
 
-  _updateOnline(dt) {
+  _updateOnline(dt, fallY) {
     const o = this.online;
     if (!o.mirror) {
+      if (fallY !== null) this.camera.position.y = fallY;
+      this._updateBgScroll();
       this._updateHUD();
       return;
     }
@@ -1268,7 +1523,7 @@ class Game {
     else if (phase === "transition") {
       camY = C.LOBBY_CAM_Y + (C.GAME_CAM_Y - C.LOBBY_CAM_Y) * t * t * (3 - 2 * t);
     }
-    this.camera.position.y = camY - this._lobbyDrop(phase, t);
+    this.camera.position.y = fallY ?? camY - this._lobbyDrop(phase, t);
     this.ceilingY = m.scrollY + VIEW_HEIGHT;
 
     const alpha = o.acc / DT;
@@ -1599,7 +1854,7 @@ class Game {
     let text = "";
     if (this.online) text = this._onlineStatus();
     else if (this.state === "lobby") text = `Round starts in ${Math.max(0, Math.ceil(this.lobbyTimer))}`;
-    else if (this.state !== "transition") text = this._aliveStatus();
+    else if (this.state !== "transition" && this.state !== "title") text = this._aliveStatus();
     if (text !== this.hud.textContent) this.hud.textContent = text;
   }
 
@@ -1610,25 +1865,19 @@ class Game {
     return you && !you.alive ? `You're out · ${left} left` : `${left} apples left`;
   }
 
-  // The lobby's buttons (top right): offline, the bot difficulty and "Play
-  // online"; online, "Play offline" and, alone in the lobby, "Start now".
+  // The lobby's buttons (top right): "Menu" (back to the title) and,
+  // online and alone in the lobby, "Start now".
   _updateBar() {
-    if (!this.diffEl) return;
     let html = "";
-    if (this.online) {
-      const o = this.online;
-      if (this.state === "lobby" || !o.mirror) html = `<span data-act="online">Play offline</span>`;
-      if (o.mirror && this.state === "lobby" && o.humans === 1) html += `<span data-act="go" class="on">Start now</span>`;
-    } else if (this.state === "lobby") {
-      html =
-        BOT_TIERS.map((t, i) => `<span data-tier="${i}"${i === this.difficulty ? ' class="on"' : ""}>${t.name}</span>`).join("") +
-        `<span data-act="online">Play online</span>`;
+    const o = this.online;
+    if (o ? this.state === "lobby" || !o.mirror : this.state === "lobby" || this.state === "over") {
+      html = `<span data-act="menu">Menu</span>`;
     }
-    if (this.state === "lobby" && isTouch()) html += `<span data-act="tilt"${this.input.tilt ? ' class="on"' : ""}>Tilt</span>`;
+    if (o && o.mirror && this.state === "lobby" && o.humans === 1) html += `<span data-act="go" class="on">Start now</span>`;
     if (html !== this.barHtml) {
       this.barHtml = html;
-      this.diffEl.innerHTML = html;
-      this.diffEl.style.display = html ? "block" : "none";
+      this.barEl.innerHTML = html;
+      this.barEl.style.display = html ? "block" : "none";
     }
   }
 
