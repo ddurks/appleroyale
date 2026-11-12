@@ -1492,7 +1492,7 @@ class Game {
       this.state = "over";
       this.input.consumeRestart(); // drop a stale press/tap from mid-round
       const w = this.views[this.round.winner];
-      const msg = w ? (w.isHuman ? "🏆 You win!" : `${this._name(w)} wins`) : "Draw";
+      const msg = w ? (w.isHuman ? "🏆 You win!" : `${this._nameOf(w.index)} wins`) : "Draw";
       const touch = matchMedia("(hover: none) and (pointer: coarse)").matches;
       this.setBanner(`${msg}  —  ${touch ? "tap" : "press R"} to restart`);
     }
@@ -1531,10 +1531,6 @@ class Game {
       you && you.core.alive ? Math.max(-bound, Math.min(bound, you.x)) : 0;
     this.camera.position.x +=
       (targetX - this.camera.position.x) * (1 - Math.exp(-CAM_FOLLOW_LERP * dt));
-  }
-
-  _name(v) {
-    return v.isHuman ? "You" : "Bot " + v.index;
   }
 
   // ── Online (net.js) ──────────────────────────────────────────────
@@ -1664,13 +1660,9 @@ class Game {
     else if (phase === "playing") this.goTimer = GO_BANNER_TIME;
     else if (phase === "over") {
       const w = this.online.mirror.winner;
-      const msg = w === this.humanIdx ? "🏆 You win!" : w >= 0 ? `${this._onlineName(w)} wins` : "Draw";
+      const msg = w === this.humanIdx ? "🏆 You win!" : w >= 0 ? `${this._nameOf(w)} wins` : "Draw";
       this.setBanner(`${msg}  —  next round soon`);
     }
-  }
-
-  _onlineName(i) {
-    return i === this.humanIdx ? "You" : (this.online.names && this.online.names[i]) || "Bot " + i;
   }
 
   _updateOnline(dt, fallY) {
@@ -2044,6 +2036,11 @@ class Game {
     return online || BOT_NAMES[i % BOT_NAMES.length];
   }
 
+  // Everyone but you offline; online, the seats without a player's name.
+  _isBot(i) {
+    return i !== this.humanIdx && !(this.online && this.online.names && this.online.names[i]);
+  }
+
   // Each apple's name, centered just under it (HTML over the canvas).
   _updateLabels() {
     if (!this.namesEl) return;
@@ -2064,6 +2061,7 @@ class Game {
       const name = this._nameOf(v.index);
       if (el.textContent !== name) el.textContent = name;
       el.classList.toggle("me", v.index === this.humanIdx);
+      el.classList.toggle("bot", this._isBot(v.index));
       const p = BABYLON.Vector3.Project(new V3(v.x, v.y - APPLE_FOOT - 0.1, 0), BABYLON.Matrix.IdentityReadOnly, vpm, vp);
       const y = Math.min(p.y, canvas.clientHeight - 24); // keep it on screen (the lobby ground is at the very bottom)
       el.style.transform = `translate(${p.x.toFixed(1)}px, ${y.toFixed(1)}px) translate(-50%, 0)`;
