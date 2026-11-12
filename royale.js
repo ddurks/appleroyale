@@ -141,10 +141,11 @@ function askTilt() {
   return D.requestPermission().then((r) => r === "granted", () => false);
 }
 const LEAF_SCALE = 1.2; // the leaf buttons' drawn size vs their button (index.html .leaf)
-// Bot names, by seat (so every online client agrees).
+// Bot names, by seat (so every online client agrees). One fewer than the
+// seats, as at least one is a player: a bot in the last seat takes the name
+// the first player's seat leaves unused.
 const BOT_NAMES = [
-  "Bad Apple", "Granny Smith", "Sir Isaac", "Core Blimey", "Big Apple",
-  "Cider Rider", "Johnny Seed", "Crabby", "Pip Squeak", "Apple Jack",
+  "Jimmy", "Applebert", "Fear", "Applito", "Hugo", "Abi Al-Apple", "Urpple", "Ahhpple", "Applefonso",
 ];
 
 // A key pressed while typing in the name box.
@@ -2033,7 +2034,10 @@ class Game {
   _nameOf(i) {
     if (i === this.humanIdx) return this.playerName || "You";
     const online = this.online && this.online.names && this.online.names[i];
-    return online || BOT_NAMES[i % BOT_NAMES.length];
+    if (online) return online;
+    if (i < BOT_NAMES.length) return BOT_NAMES[i];
+    for (let seat = 0; seat < BOT_NAMES.length; seat++) if (!this._isBot(seat)) return BOT_NAMES[seat];
+    return BOT_NAMES[0];
   }
 
   // Everyone but you offline; online, the seats without a player's name.
