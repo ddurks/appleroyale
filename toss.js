@@ -87,131 +87,23 @@ const FACES = ["elated", "o", "frown", "grimace", "woah"];
 const LEAVES = 14;
 
 // ─── Grass ───────────────────────────────────────────────────────────
-// A field of single blades (one mesh, drawn once per blade), bent in the
-// vertex shader: a steady lean downwind, gusts rolling across the field the
-// way the wind blows, and each blade's own flutter. Blades are sown where
-// the camera looks, thinning with distance so the screen is evenly covered.
+// The field (grass.js): blades sown where the camera looks, thinning with
+// distance so the screen is evenly covered.
 
 const GRASS_BLADES = 60000;
 const GRASS_FAR = 140; // how far from the camera the field reaches
-const GRASS_SOIL = "#3a7d24"; // the ground between the blades
 
-BABYLON.Effect.ShadersStore.grassVertexShader = `
-precision highp float;
-attribute vec3 position;
-attribute vec2 uv;
-#include<instancesDeclaration>
-uniform mat4 viewProjection;
-uniform float time;
-uniform float wind;
-uniform vec2 gustAt; // how far the wide gusts and the ripples have travelled
-varying float vUp;
-varying float vTint;
-varying float vGust;
-void main() {
-#include<instancesVertex>
-  vec3 root = finalWorld[3].xyz;
-  float tall = length(finalWorld[1].xyz);
-  float rnd = fract(sin(dot(root.xz, vec2(12.9898, 78.233))) * 43758.5453);
-  float up = uv.y; // 0 at the root, 1 at the tip
-  float hard = abs(wind);
-  // Gusts: two bands of waves travelling downwind, a wide one and a ripple.
-  float gust = 0.6 * sin(0.22 * root.x + 0.13 * root.z - gustAt.x)
-             + 0.4 * sin(0.7 * root.x - 0.45 * root.z - gustAt.y + 6.28 * rnd * 0.15);
-  gust = 0.5 + 0.5 * gust;
-  float lean = wind * (0.07 + 0.11 * gust) + 0.05 * sin(time * (2.5 + 3.0 * rnd) + 6.28 * rnd) * (0.6 + 0.25 * hard);
-  float sway = 0.04 * sin(time * (1.7 + 2.0 * rnd) + 4.0 * rnd);
-  vec4 p = finalWorld * vec4(position, 1.0);
-  float bend = up * up * tall;
-  p.x += lean * bend;
-  p.z += sway * bend;
-  p.y -= (1.0 - cos(min(abs(lean), 1.3))) * bend; // a bent blade is lower
-  vUp = up;
-  vTint = rnd;
-  vGust = gust * min(hard / 3.0, 1.0);
-  gl_Position = viewProjection * p;
-}`;
-BABYLON.Effect.ShadersStore.grassFragmentShader = `
-precision highp float;
-varying float vUp;
-varying float vTint;
-varying float vGust;
-void main() {
-  vec3 low = vec3(0.09, 0.27, 0.06);
-  vec3 high = mix(vec3(0.36, 0.68, 0.18), vec3(0.52, 0.78, 0.24), vTint);
-  vec3 c = mix(low, high, vUp * vUp * 0.4 + vUp * 0.6);
-  c += vec3(0.10, 0.11, 0.04) * vGust * vUp; // gusts show as paler bands
-  gl_FragColor = vec4(c, 1.0);
-}`;
-
-class Grass {
-  constructor(scene, camPos) {
-    // One blade: a tapering strip, curved a little, a unit tall and wide.
-    const LEVELS = 4;
-    const positions = [];
-    const uvs = [];
-    const indices = [];
-    for (let i = 0; i <= LEVELS; i++) {
-      const t = i / LEVELS;
-      const half = 0.5 * (1 - 0.9 * t);
-      positions.push(-half, t, 0.25 * t * t, half, t, 0.25 * t * t);
-      uvs.push(0, t, 1, t);
-      if (i < LEVELS) indices.push(2 * i, 2 * i + 1, 2 * i + 2, 2 * i + 1, 2 * i + 3, 2 * i + 2);
-    }
-    const blade = new BABYLON.Mesh("grass", scene);
-    const vd = new BABYLON.VertexData();
-    vd.positions = positions;
-    vd.uvs = uvs;
-    vd.indices = indices;
-    vd.applyToMesh(blade);
-
-    // Sown through the wedge the camera sees, evenly by how far away (so
-    // near ground, which fills more of the screen, gets more blades).
-    const m = new Float32Array(16 * GRASS_BLADES);
-    for (let i = 0; i < GRASS_BLADES; i++) {
-      const away = 1.5 * Math.pow(GRASS_FAR / 1.5, Math.random());
-      const x = camPos.x + (2 * Math.random() - 1) * (2 + 0.8 * away);
-      const z = camPos.z + away;
-      const yaw = 6.28 * Math.random();
-      const wide = 0.14 + 0.1 * Math.random() + 0.003 * away; // far blades a little wider, to fill in
-      const tall = (0.6 + 0.6 * Math.random()) * (x * x + z * z < 10 ? 0.4 : 1); // short where the stump stands
-      const c = Math.cos(yaw);
-      const s = Math.sin(yaw);
-      m.set([c * wide, 0, -s * wide, 0, 0, tall, 0, 0, s * tall, 0, c * tall, 0, x, 0, z, 1], 16 * i);
-    }
-    blade.thinInstanceSetBuffer("matrix", m, 16, true);
-    blade.alwaysSelectAsActiveMesh = true;
-    blade.isPickable = false;
-
-    this.mat = new BABYLON.ShaderMaterial("grassMat", scene, "grass", {
-      attributes: ["position", "uv"],
-      uniforms: ["world", "viewProjection", "time", "wind", "gustAt"],
-    });
-    this.mat.backFaceCulling = false;
-    blade.material = this.mat;
-    this.time = 0;
-    this.wind = 0;
-    this.windV = 0; // how fast the wind is changing
-    this.gustAt = new BABYLON.Vector2(0, 0);
+function sowField(camPos) {
+  const m = new Float32Array(16 * GRASS_BLADES);
+  for (let i = 0; i < GRASS_BLADES; i++) {
+    const away = 1.5 * Math.pow(GRASS_FAR / 1.5, Math.random());
+    const x = camPos.x + (2 * Math.random() - 1) * (2 + 0.8 * away);
+    const z = camPos.z + away;
+    const wide = 0.14 + 0.1 * Math.random() + 0.003 * away; // far blades a little wider, to fill in
+    const tall = (0.6 + 0.6 * Math.random()) * (x * x + z * z < 10 ? 0.4 : 1); // short where the stump stands
+    Grass.blade(m, i, x, 0, z, wide, tall);
   }
-
-  // The wind comes round to its new strength smoothly, gathering and then
-  // easing off (a critically damped spring), never overshooting. The gusts
-  // travel on from wherever they'd got to, only faster or slower (or, as the
-  // wind passes through still, gently turning round), so a change never
-  // sends the waves racing.
-  update(dt, wind) {
-    this.time += dt;
-    this.windV += (4 * (wind - this.wind) - 4 * this.windV) * dt;
-    this.wind += this.windV * dt;
-    const w = this.wind;
-    const way = Math.tanh(2 * w); // ±1, passing smoothly through 0
-    this.gustAt.x += (0.9 * way + 0.5 * w) * dt;
-    this.gustAt.y += (1.6 * way + 0.8 * w) * dt;
-    this.mat.setFloat("time", this.time);
-    this.mat.setFloat("wind", w);
-    this.mat.setVector2("gustAt", this.gustAt);
-  }
+  return m;
 }
 
 // ─── Clouds ──────────────────────────────────────────────────────────
@@ -501,64 +393,6 @@ function outlineContact(outline, r, y, s) {
   return { depth: inside ? d + s : s - d, nr: (r - qr) * k, ny: (y - qy) * k };
 }
 
-// ─── Slice pile ──────────────────────────────────────────────────────
-// Where the slices of missed apples end up: they stay where they fall, on
-// top of whatever fell there before. A slice at rest costs nothing: it
-// becomes one more copy (thin instance) of its shape, so the whole pile is
-// drawn in one go per shape (an apple is 8 slices) however big, and is only
-// touched when a slice lands. Heights come from a coarse grid counting what has landed in
-// each cell. Past PILE_MAX of a shape, the oldest goes.
-
-const PILE_MAX = 48; // of each of an apple's 8 slices
-const PILE_CELL = 0.8;
-const PILE_BASE = 0.35; // where the first slice in a cell rests
-const PILE_STEP = 0.2; // …and each one on top of it
-
-class SlicePile {
-  constructor(scene) {
-    this.scene = scene;
-    this.shapes = new Map(); // geometry → its copies
-    this.cells = new Map(); // grid cell → slices resting there
-  }
-
-  _cell(x, z) {
-    return (Math.floor(x / PILE_CELL) + 4096) * 8192 + Math.floor(z / PILE_CELL) + 4096;
-  }
-
-  restY(x, z) {
-    return PILE_BASE + PILE_STEP * (this.cells.get(this._cell(x, z)) || 0);
-  }
-
-  // Take a slice that has just landed: its place joins its shape's copies.
-  add(mesh) {
-    let shape = this.shapes.get(mesh.geometry);
-    const world = mesh.computeWorldMatrix(true);
-    if (!shape) {
-      const holder = new BABYLON.Mesh("slicePile", this.scene);
-      mesh.geometry.applyToMesh(holder);
-      holder.material = mesh.material;
-      // Half the slices are mirror images; their copies are too.
-      if (world.determinant() < 0) holder.sideOrientation = BABYLON.Material.ClockWiseSideOrientation;
-      holder.isPickable = false;
-      holder.alwaysSelectAsActiveMesh = true;
-      const matrices = new Float32Array(16 * PILE_MAX);
-      holder.thinInstanceSetBuffer("matrix", matrices, 16, false);
-      shape = { holder, matrices, cells: new Float64Array(PILE_MAX), n: 0 };
-      this.shapes.set(mesh.geometry, shape);
-    }
-    const i = shape.n % PILE_MAX;
-    if (shape.n >= PILE_MAX) this.cells.set(shape.cells[i], this.cells.get(shape.cells[i]) - 1);
-    const cell = this._cell(mesh.position.x, mesh.position.z);
-    this.cells.set(cell, (this.cells.get(cell) || 0) + 1);
-    world.copyToArray(shape.matrices, 16 * i);
-    shape.cells[i] = cell;
-    shape.n++;
-    shape.holder.thinInstanceCount = Math.min(shape.n, PILE_MAX);
-    shape.holder.thinInstanceBufferUpdated("matrix");
-    mesh.dispose();
-  }
-}
-
 class Toss {
   constructor(canvas) {
     this.canvas = canvas;
@@ -600,7 +434,7 @@ class Toss {
     const ground = BABYLON.MeshBuilder.CreateGround("ground", { width: 400, height: soilFar + 40 }, scene);
     ground.position.z = (soilFar - 40) / 2;
     ground.material = flat("soil", GRASS_SOIL);
-    this.grass = new Grass(scene, this.camera.position);
+    this.grass = new Grass(scene, sowField(this.camera.position));
     this.clouds = new Clouds(scene, this.camera, this.engine);
 
     this._buildBucket(flat);
@@ -621,7 +455,6 @@ class Toss {
     this._addApple(apple);
     this.sliceBurst = new window.AppleSliceBurstEffect(scene);
     await this.sliceBurst.preload();
-    this.pile = new SlicePile(scene);
 
     this._setDist(this.distIdx);
     this.clouds.scatter();
@@ -1039,20 +872,19 @@ class Toss {
     w.subtractInPlace(ot.scale(jt / APPLE_I));
   }
 
-  // A miss: the apple bursts into slices where it hits the ground, and they
-  // stay where they fall.
+  // A miss: the apple bursts into slices where it hits the ground; they
+  // fall back into the grass and are gone.
   _splat() {
     this.holder.setEnabled(false);
     this.sliceBurst.burst({
       center: this.pos,
-      lifetimeMs: 6000,
+      lifetimeMs: 4000,
       radialMin: 0.5,
       radialMax: 1.6,
       upMin: 2,
       upMax: 4,
       gravity: -GRAVITY,
-      restY: (x, z) => this.pile.restY(x, z),
-      onRest: (mesh) => this.pile.add(mesh),
+      completeBelowY: -2,
     });
     this.phase = "out";
     this.t = 0;

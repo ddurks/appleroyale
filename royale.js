@@ -124,6 +124,11 @@ const CLOUD_RECTS = [
   [0, 138, 284, 102], [286, 138, 174, 100], [462, 138, 304, 70], [768, 138, 105, 51], [875, 138, 102, 51],
 ];
 const CLOUD_COUNT = 10;
+const LOBBY_SKY_TOP = -6; // about where the tree's leaves begin, over the lobby
+// The lobby's grass (grass.js).
+const LOBBY_GRASS = 7000; // blades
+const LOBBY_GRASS_REACH = 32; // either side of the middle
+const APPLE_BODY = 1.7; // how tall an apple stands, without its stem
 const CLOUD_W = [2.5, 9]; // world-unit widths, farthest (lowest) to nearest (highest)
 const CLOUD_SPEED = [0.35, 1.5]; // units/s, likewise
 const NAME_KEY = "appleRoyale.name";
@@ -911,8 +916,11 @@ class Trophy {
 // the right comes back off the left at a new height, shape and facing.
 
 class Clouds {
-  constructor(game) {
+  // band(): the sky they keep to ({ left, right, bottom, top }); z: how far back.
+  constructor(game, z, band) {
     this.game = game;
+    this.z = z;
+    this._band = band;
     const scene = game.scene;
     const tex = new BABYLON.Texture("./assets/clouds.png", scene);
     tex.getAlphaFromRGB = true;
@@ -950,19 +958,6 @@ class Clouds {
     }
   }
 
-  // The view's sides, and the sky from the treetop to the top of the title's
-  // view (fixed to the treetop, so the fall carries it away).
-  _band() {
-    const cam = this.game.camera;
-    const bottom = this.game.crown.position.y;
-    return {
-      left: cam.position.x + cam.orthoLeft,
-      right: cam.position.x + cam.orthoRight,
-      bottom,
-      top: bottom + 1 + cam.orthoTop - cam.orthoBottom,
-    };
-  }
-
   // A new cloud at x (or just off the left edge): random nearness, which
   // sets its height, size, speed and depth; random shape and facing.
   _spawn(c, x, left) {
@@ -977,10 +972,10 @@ class Clouds {
     c.mesh.scaling.set(Math.random() < 0.5 ? -w : w, h, 1);
     c.w = w;
     c.speed = (CLOUD_SPEED[0] + (CLOUD_SPEED[1] - CLOUD_SPEED[0]) * near) * (0.9 + 0.2 * Math.random());
-    // Clear of the treetop at the bottom and the view's top edge.
+    // Clear of the band's bottom and top.
     const lo = band.bottom + h / 2 + 0.5;
     const hi = Math.max(lo, band.top - h / 2 - 0.5);
-    c.mesh.position.set(x ?? left - w / 2 - Math.random() * 3, lo + (hi - lo) * near, 19 - near); // the treetop is at z 20
+    c.mesh.position.set(x ?? left - w / 2 - Math.random() * 3, lo + (hi - lo) * near, this.z - near);
   }
 }
 
@@ -1366,12 +1361,26 @@ class Game {
       const dt = this.engine.getDeltaTime() / 1000;
       for (const v of this.views) v.updateEyes(dt);
       if (this.trophy) this.trophy.update(dt, this.state === "over" && this.youWon);
+      if (this.lobbyClouds) this.lobbyClouds.update(dt);
+      if (this.lobbyGrass) this.lobbyGrass.update(dt, 1.2 + 0.8 * Math.sin(0.3 * this.t)); // a breeze, rising and falling
     });
 
     this.titleScreen = new TitleScreen(this, titleWords);
     this.trophy = new Trophy(this);
     this._buildCrown();
-    this.clouds = new Clouds(this);
+    // Clouds over the treetop (the title, and the fall from it): the view's
+    // sides, and from the treetop (at z 20; they pass just in front) to the
+    // top of the title's view, fixed to the treetop so the fall carries it
+    // away. And clouds in the lobby's sky, between the grass and the tree's
+    // leaves, behind the trunk.
+    const sides = () => ({ left: this.camera.position.x + this.camera.orthoLeft, right: this.camera.position.x + this.camera.orthoRight });
+    this.clouds = new Clouds(this, 19, () => {
+      const bottom = this.crown.position.y;
+      return { ...sides(), bottom, top: bottom + 1 + this.camera.orthoTop - this.camera.orthoBottom };
+    });
+    this.lobbyClouds = new Clouds(this, 46, () => ({ ...sides(), bottom: LOBBY_GROUND_Y, top: LOBBY_SKY_TOP }));
+    this.lobbyClouds.show(true);
+    this.lobbyClouds.scatter();
     this._showTitle();
   }
 
@@ -1435,36 +1444,30 @@ class Game {
     ground.position.set(0, LOBBY_GROUND_Y - groundH / 2, 2.7);
     ground.isPickable = false;
     const gmat = new BABYLON.StandardMaterial("lobbyGroundMat", scene);
-    gmat.diffuseColor = new BABYLON.Color3(0.08, 0.19, 0.07);
-    gmat.emissiveColor = new BABYLON.Color3(0.02, 0.06, 0.02);
+    gmat.diffuseColor = BABYLON.Color3.FromHexString(GRASS_SOIL);
+    gmat.emissiveColor = gmat.diffuseColor.scale(0.3);
     gmat.specularColor = BABYLON.Color3.Black();
     ground.material = gmat;
     this.lobbyGroundMat = gmat;
 
-    // Simple grass blades along the ground
-    const grassMat = new BABYLON.StandardMaterial("lobbyGrassMat", scene);
-    grassMat.diffuseColor = new BABYLON.Color3(0.11, 0.26, 0.09);
-    grassMat.emissiveColor = new BABYLON.Color3(0.03, 0.09, 0.03);
-    grassMat.specularColor = BABYLON.Color3.Black();
-    grassMat.backFaceCulling = false;
-    this.lobbyGrassMat = grassMat;
-    for (let i = 0; i < 140; i++) {
-      const h = 1.0 + Math.random() * 0.9; // apple-scale tall
-      const blade = BABYLON.MeshBuilder.CreateCylinder(
-        "grass",
-        { height: h, diameterBottom: 0.22, diameterTop: 0, tessellation: 3 },
-        scene,
-      );
-      blade.parent = root;
-      blade.material = grassMat;
-      blade.position.set(
-        -30 + Math.random() * 60,
-        LOBBY_GROUND_Y + h / 2 - 0.05,
-        2.35 + Math.random() * 0.3,
-      );
-      blade.rotation.z = (Math.random() - 0.5) * 0.4;
-      blade.isPickable = false;
+    // Grass as in Apple Toss (grass.js), seen side on: a band behind the
+    // apples reaching two thirds of the way up one standing on the ground,
+    // and a band in front, rooted on down to the bottom of the view,
+    // reaching a third. It's drawn with the apples, so it sorts with them.
+    const blades = new Float32Array(16 * LOBBY_GRASS);
+    for (let i = 0; i < LOBBY_GRASS; i++) {
+      const x = (2 * Math.random() - 1) * LOBBY_GRASS_REACH;
+      const wide = 0.14 + 0.1 * Math.random();
+      if (i % 5 < 2) {
+        Grass.blade(blades, i, x, LOBBY_GROUND_Y - 0.05, 1.2 + 1.3 * Math.random(), wide, APPLE_BODY * (0.4 + 0.27 * Math.random()));
+      } else {
+        const root = LOBBY_GROUND_Y - 0.95 * Math.random();
+        const tip = LOBBY_GROUND_Y + APPLE_BODY * (0.1 + 0.23 * Math.random());
+        Grass.blade(blades, i, x, root, -1.2 - 1.3 * Math.random(), wide, tip - root);
+      }
     }
+    this.lobbyGrass = new Grass(scene, blades);
+    this.lobbyGrass.mesh.renderingGroupId = 2;
 
     // Tree trunk bridging the tree down to the ground. Placed behind the green
     // ground AND both background layers (z past them), so it only shows through
@@ -1492,7 +1495,8 @@ class Game {
       this.lobbyRoot.dispose(false, true);
       this.lobbyRoot = null;
     }
-    this.lobbyGroundMat = this.lobbyGrassMat = null;
+    if (this.lobbyGrass) this.lobbyGrass.dispose();
+    this.lobbyGroundMat = this.lobbyGrass = null;
   }
 
   // Lobby over: everyone is carried up into the tree, and every bot gets a

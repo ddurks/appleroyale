@@ -37,6 +37,9 @@ goes on — stay in frame to stay alive. The top of the screen is a ceiling
 - Bounce into another apple → you bounce off each other.
 - Land on another apple's **head** → you bounce up and they get squished flat
   and knocked down. Ground-pound onto a head for a harder knockdown.
+- The lobby: Apple Toss's grass (`grass.js`) seen side on, a third of the
+  way up the apples in front of them and two thirds behind, and clouds
+  drifting through the sky under the tree.
 - Win and you get the trophy over the banner: a golden apple on a block of
   wood, its gold plaque engraved "victory royale" (`Trophy` in `royale.js`).
 - Faces react: grimace when stomped, yell while pounding, frown near the
@@ -64,11 +67,10 @@ outlines, so what it hits is exactly what you see. The apple is a rigid
 body whose hull is its own vertices in the pose it was thrown in: it can
 glance off the rim, bounce in or out, and only counts once it comes to rest
 inside. Each apple drops onto the stump stretched and squashes as it lands.
-A miss bursts into slices where it hits the ground, and the slices stay
-where they fall, piling up (`SlicePile`: each slice at rest is one more
-copy of its shape, so the pile costs nothing until another lands).
-The grass is single blades bent by the wind in a shader (`Grass` in
-`toss.js`).
+A miss bursts into slices where it hits the ground; they fall back into
+the grass and are gone.
+The grass is single blades bent by the wind in a shader (`grass.js`, also
+the Royale lobby's grass).
 The apple waits on a stump among four trees, under the title screen's
 clouds. The tree (`assets/tosstree.glb`: a simple trunk under a ball of
 shingled leaves, as one mesh with lighter leaves), the stump
