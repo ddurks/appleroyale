@@ -58,6 +58,13 @@ sideways in flight, so aim into it. Baskets in a row are the score; a miss
 starts over. **Near / Mid / Far** moves the basket, each with its own best.
 The grass is single blades bent by the wind in a shader (`Grass` in
 `toss.js`).
+The apple waits on a stump among four trees, under the title screen's
+clouds. The tree (`assets/tosstree.glb`: a simple trunk under a ball of
+shingled leaves, as one mesh with lighter leaves), the stump
+(`assets/stump.glb`) and the loose leaf (`assets/leaf.glb`) come from the
+**TossTree** scene in `appletree.blend`; the bark is `assets/bark.png`.
+The grass is single blades bent by the wind in a shader (`Grass` in
+`toss.js`).
 The tree is `assets/tree.glb`, exported from `appletree.blend` (the tree,
 its leaves and hanging apples; modifiers applied).
 

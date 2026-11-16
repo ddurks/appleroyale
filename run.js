@@ -75,12 +75,12 @@ class Run {
     this.shadow.material.alpha = 0.3;
     this.shadow.material.disableLighting = true;
 
-    const [apple, tree] = await Promise.all([
+    const [apple, leaf] = await Promise.all([
       BABYLON.SceneLoader.LoadAssetContainerAsync("./assets/", "apple.glb", scene),
-      BABYLON.SceneLoader.LoadAssetContainerAsync("./assets/", "tree.glb", scene),
+      BABYLON.SceneLoader.LoadAssetContainerAsync("./assets/", "leaf.glb", scene),
     ]);
     this._addApple(apple);
-    this._takeLeaf(tree);
+    this._takeLeaf(leaf);
 
     this._bindInput();
     this._restart();
@@ -120,14 +120,13 @@ class Run {
     this.faceMat.albedoTexture = name ? this.faceTextures[name] : this.faceDefault;
   }
 
-  // One leaf out of the tree model, to dress the branches with copies of.
+  // The tree's leaf (assets/leaf.glb, as modelled: 3.7 long), to dress the
+  // branches with copies of.
   _takeLeaf(container) {
     container.addAllToScene();
-    const leaf = container.meshes.find((m) => m.name === "leaf");
+    const leaf = container.meshes.find((m) => m.getTotalVertices() > 0);
     leaf.setParent(null);
-    for (const m of container.meshes) if (m !== leaf) m.dispose();
     leaf.rotationQuaternion = null;
-    this.leafScale = new V3(Math.abs(leaf.scaling.x), Math.abs(leaf.scaling.y), Math.abs(leaf.scaling.z)); // its size in the tree
     leaf.material.backFaceCulling = false;
     leaf.isVisible = false;
     this.leaf = leaf;
@@ -272,7 +271,7 @@ class Run {
       const l = this.leaf.createInstance("leaf");
       l.position = pos;
       l.rotation.set(6.28 * Math.random(), 6.28 * Math.random(), 6.28 * Math.random());
-      l.scaling.copyFrom(this.leafScale).scaleInPlace(size);
+      l.scaling.setAll(0.39 * size); // 0.39: its size in the tree
       seg.meshes.push(l);
     };
     // A bough: a twig up one side and across, with a clump of leaves on it.

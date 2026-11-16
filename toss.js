@@ -7,7 +7,9 @@ const V3 = BABYLON.Vector3;
 
 const GRAVITY = 30;
 const APPLE_R = 0.85; // the body's radius; the model's origin is its feet
-const START = new V3(0, APPLE_R, 0);
+const TREE_SCALE = 0.8; // the trees and the stump, against how they were modelled
+const STUMP_TOP = 1.5 * TREE_SCALE; // the apple waits on a stump
+const START = new V3(0, STUMP_TOP + APPLE_R, 0);
 
 // The basket: how far away, and how long the throw takes to get there.
 const DISTS = [
@@ -18,6 +20,7 @@ const DISTS = [
 const BASKET_H = 2.6;
 const RIM_R = 2.1;
 const BASE_R = 1.6;
+const BASKET_FLOOR = 1.3; // inside, above the grass
 const IN_R = RIM_R - 0.45; // the apple's centre this close to the middle goes in
 const RIM_HIT_R = RIM_R + 0.75; // …this close clips the rim and bounces away
 
@@ -118,8 +121,8 @@ class Grass {
       const x = camPos.x + (2 * Math.random() - 1) * (2 + 0.8 * away);
       const z = camPos.z + away;
       const yaw = 6.28 * Math.random();
-      const wide = 0.07 + 0.05 * Math.random() + 0.0015 * away; // far blades a little wider, to fill in
-      const tall = 0.3 + 0.3 * Math.random();
+      const wide = 0.14 + 0.1 * Math.random() + 0.003 * away; // far blades a little wider, to fill in
+      const tall = (0.6 + 0.6 * Math.random()) * (x * x + z * z < 10 ? 0.4 : 1); // short where the stump stands
       const c = Math.cos(yaw);
       const s = Math.sin(yaw);
       m.set([c * wide, 0, -s * wide, 0, 0, tall, 0, 0, s * tall, 0, c * tall, 0, x, 0, z, 1], 16 * i);
@@ -144,6 +147,93 @@ class Grass {
     this.wind += (wind - this.wind) * Math.min(1, 2 * dt);
     this.mat.setFloat("time", this.time);
     this.mat.setFloat("wind", this.wind);
+  }
+}
+
+// ─── Clouds ──────────────────────────────────────────────────────────
+// The title screen's clouds (royale.js Clouds), far off in the sky behind
+// the trees: drifting left to right, lower ones farther away (smaller,
+// slower, behind), higher ones nearer.
+
+const CLOUD_RECTS = [
+  [0, 0, 212, 136], [214, 0, 241, 117], [457, 0, 191, 115], [650, 0, 158, 114], [810, 0, 199, 105],
+  [0, 138, 284, 102], [286, 138, 174, 100], [462, 138, 304, 70], [768, 138, 105, 51], [875, 138, 102, 51],
+];
+const CLOUD_COUNT = 10;
+const CLOUD_Z = 170;
+const CLOUD_W = [0.1, 0.35]; // widths as a share of the view's height out there, farthest to nearest
+const CLOUD_SPEED = [0.0135, 0.058]; // per second, likewise
+
+class Clouds {
+  constructor(scene, camera, engine) {
+    this.camera = camera;
+    this.engine = engine;
+    const tex = new BABYLON.Texture("./assets/clouds.png", scene);
+    tex.getAlphaFromRGB = true;
+    tex.wrapU = tex.wrapV = BABYLON.Texture.CLAMP_ADDRESSMODE;
+    const mat = new BABYLON.StandardMaterial("cloudMat", scene);
+    mat.emissiveColor = new BABYLON.Color3(1, 1, 1);
+    mat.disableLighting = true;
+    mat.opacityTexture = tex;
+    mat.backFaceCulling = false; // a mirrored cloud is a flipped plane
+    this.clouds = [];
+    for (let i = 0; i < CLOUD_COUNT; i++) {
+      const mesh = BABYLON.MeshBuilder.CreatePlane(`cloud${i}`, { size: 1, updatable: true }, scene);
+      mesh.material = mat;
+      mesh.isPickable = false;
+      this.clouds.push({ mesh, w: 0, speed: 0 });
+    }
+  }
+
+  // A fresh sky, clouds anywhere across the view.
+  scatter() {
+    const { left, right } = this._band();
+    for (const c of this.clouds) this._spawn(c, left + Math.random() * (right - left));
+  }
+
+  update(dt) {
+    const { left, right } = this._band();
+    for (const c of this.clouds) {
+      c.mesh.position.x += c.speed * dt;
+      if (c.mesh.position.x - c.w / 2 > right) this._spawn(c, null, left);
+    }
+  }
+
+  // What the camera sees of the sky at the clouds' distance: its sides,
+  // and from just over the horizon to the top of the screen.
+  _band() {
+    const cam = this.camera;
+    const t = cam.getTarget();
+    const depth = CLOUD_Z - cam.position.z;
+    const viewH = 2 * depth * Math.tan(cam.fov / 2);
+    const halfW = (viewH / 2) * (this.engine.getRenderWidth() / this.engine.getRenderHeight());
+    const pitch = Math.atan2(cam.position.y - t.y, t.z - cam.position.z);
+    return {
+      left: -halfW,
+      right: halfW,
+      bottom: cam.position.y + 0.04 * viewH,
+      top: cam.position.y + depth * Math.tan(cam.fov / 2 - pitch),
+      viewH,
+    };
+  }
+
+  // A new cloud at x (or just off the left edge): random nearness, which
+  // sets its height, size, speed and depth; random shape and facing.
+  _spawn(c, x, left) {
+    const band = this._band();
+    const near = Math.random();
+    const [rx, ry, rw, rh] = CLOUD_RECTS[Math.floor(Math.random() * CLOUD_RECTS.length)];
+    const w = (CLOUD_W[0] + (CLOUD_W[1] - CLOUD_W[0]) * near) * band.viewH;
+    const h = (w * rh) / rw;
+    const u0 = rx / 1024, u1 = (rx + rw) / 1024;
+    const vTop = 1 - ry / 240, vBot = 1 - (ry + rh) / 240;
+    c.mesh.updateVerticesData(BABYLON.VertexBuffer.UVKind, [u0, vBot, u1, vBot, u1, vTop, u0, vTop]);
+    c.mesh.scaling.set(Math.random() < 0.5 ? -w : w, h, 1);
+    c.w = w;
+    c.speed = (CLOUD_SPEED[0] + (CLOUD_SPEED[1] - CLOUD_SPEED[0]) * near) * band.viewH * (0.9 + 0.2 * Math.random());
+    const lo = band.bottom + h / 2;
+    const hi = Math.max(lo, band.top - h / 2);
+    c.mesh.position.set(x ?? left - w / 2 - Math.random() * 0.1 * band.viewH, lo + (hi - lo) * near, CLOUD_Z - near);
   }
 }
 
@@ -183,6 +273,7 @@ class Toss {
     const ground = BABYLON.MeshBuilder.CreateGround("ground", { width: 400, height: 400 }, scene);
     ground.material = flat("soil", GRASS_SOIL);
     this.grass = new Grass(scene, this.camera.position);
+    this.clouds = new Clouds(scene, this.camera, this.engine);
 
     this._buildBasket(flat);
 
@@ -193,19 +284,23 @@ class Toss {
     this.shadow.material.alpha = 0.3;
     this.shadow.material.disableLighting = true;
 
-    const [apple, tree] = await Promise.all([
-      BABYLON.SceneLoader.LoadAssetContainerAsync("./assets/", "apple.glb", scene),
-      BABYLON.SceneLoader.LoadAssetContainerAsync("./assets/", "tree.glb", scene),
-    ]);
-    this._addTree(tree, flat("bark", "#65493A"));
-    this._buildLeaves();
+    const [apple, tree, leaf, stump] = await Promise.all(
+      ["apple", "tosstree", "leaf", "stump"].map((n) => BABYLON.SceneLoader.LoadAssetContainerAsync("./assets/", `${n}.glb`, scene)),
+    );
+    this._addTrees(tree);
+    this._addStump(stump);
+    this._buildLeaves(leaf);
     this._addApple(apple);
 
     this._setDist(this.distIdx);
+    this.clouds.scatter();
     this._newWind();
     this._bindInput();
     this._buildDistButtons();
-    window.addEventListener("resize", () => this.engine.resize());
+    window.addEventListener("resize", () => {
+      this.engine.resize();
+      this._placeTrees();
+    });
     this.engine.runRenderLoop(() => {
       this._update(Math.min(this.engine.getDeltaTime() / 1000, 0.05));
       scene.render();
@@ -234,33 +329,68 @@ class Toss {
     shade.material = flat("basketShadowMat", "#000000");
     shade.material.alpha = 0.25;
     shade.material.disableLighting = true;
-    for (const m of [side, rim, shade]) m.parent = this.basket;
+    // A floor part-way up, so no grass shows inside.
+    const floor = BABYLON.MeshBuilder.CreateDisc("basketFloor", { radius: BASE_R + ((RIM_R - BASE_R) * BASKET_FLOOR) / BASKET_H, tessellation: 24 }, scene);
+    floor.rotation.x = Math.PI / 2;
+    floor.position.y = BASKET_FLOOR;
+    floor.material = rim.material;
+    for (const m of [side, rim, shade, floor]) m.parent = this.basket;
   }
 
-  // Loose leaves on the wind (copies of one of the tree's): how they blow
-  // is how the apple will drift.
-  _buildLeaves() {
-    const src = this.tree.getChildMeshes(false).find((m) => m.name === "tree_leaf");
+  // Loose leaves on the wind (copies of the tree's leaf): how they blow is
+  // how the apple will drift.
+  _buildLeaves(container) {
+    container.addAllToScene();
+    const src = container.meshes.find((m) => m.getTotalVertices() > 0);
+    src.setParent(null);
+    src.rotationQuaternion = null;
+    src.material.backFaceCulling = false;
+    src.isVisible = false;
     this.leaves = [];
     for (let i = 0; i < LEAVES; i++) {
       const mesh = src.createInstance(`windLeaf${i}`);
-      mesh.parent = null;
-      mesh.rotationQuaternion = null;
-      mesh.scaling.copyFrom(src.absoluteScaling).scaleInPlace(0.8);
+      mesh.scaling.setAll(0.3);
       mesh.position.set(-16 + 32 * Math.random(), 1 + 9 * Math.random(), 8 + 36 * Math.random());
       this.leaves.push({ mesh, phase: 6.28 * Math.random(), spin: 2 + 3 * Math.random() });
     }
   }
 
-  _addTree(container, bark) {
-    const inst = container.instantiateModelsToScene((n) => `tree_${n}`, false);
-    const root = inst.rootNodes[0];
-    for (const m of root.getChildMeshes(false)) {
-      m.isPickable = false;
-      if (/_tree$/.test(m.name)) m.material = bark;
-      else if (m.material) m.material.backFaceCulling = false; // leaves show both sides
-    }
-    this.tree = root;
+  // Four of the tree (assets/tosstree.glb, from appletree.blend's TossTree
+  // scene), each turned its own way; _placeTrees stands them round the basket.
+  _addTrees(container) {
+    this.trees = [0.4, 2.1, 3.9, 5.2].map((turn, i) => {
+      const node = new BABYLON.TransformNode(`tree${i}`, this.scene);
+      const inst = container.instantiateModelsToScene((n) => `tree${i}_${n}`, false);
+      inst.rootNodes[0].parent = node;
+      node.scaling.setAll(TREE_SCALE);
+      node.rotation.y = turn;
+      for (const m of node.getChildMeshes(false)) m.isPickable = false;
+      return node;
+    });
+  }
+
+  // Two trees a little behind the basket, either side of it, and two
+  // nearer than it out at the screen's edges, half out of view (on a wide
+  // screen, not so far out that they stop framing the basket).
+  _placeTrees() {
+    const z = DISTS[this.distIdx].z;
+    const cam = this.camera;
+    const aspect = this.engine.getRenderWidth() / this.engine.getRenderHeight();
+    const outer = z / 2 + 5.5;
+    const inner = z / 2 + 17;
+    const edge = Math.min(16, (outer - cam.position.z) * Math.tan(cam.fov / 2) * aspect);
+    this.trees[0].position.set(-edge, 0, outer);
+    this.trees[1].position.set(edge, 0, outer);
+    this.trees[2].position.set(-7, 0, inner);
+    this.trees[3].position.set(7, 0, inner);
+  }
+
+  // The stump the apple waits on: the foot of the same trunk, sliced off low
+  // and twice the size.
+  _addStump(container) {
+    const node = new BABYLON.TransformNode("stump", this.scene);
+    container.instantiateModelsToScene((n) => `stump_${n}`, false).rootNodes[0].parent = node;
+    node.scaling.setAll(TREE_SCALE);
   }
 
   _addApple(container) {
@@ -294,8 +424,7 @@ class Toss {
     const d = DISTS[i];
     this.basket.position.set(0, 0, d.z);
     this.camera.setTarget(new V3(0, 1.0, d.z * 0.5));
-    // The tree stands behind the basket, off to one side.
-    this.tree.position.set(-3.5, 4.5, d.z + 11);
+    this._placeTrees();
     this.score = 0;
     this._reset();
   }
@@ -385,6 +514,7 @@ class Toss {
 
   _update(dt) {
     this.grass.update(dt, this.wind);
+    this.clouds.update(dt);
     if (!this.holder) return;
     this._blowLeaves(dt);
     const p = this.pos;
@@ -400,7 +530,7 @@ class Toss {
     } else if (this.phase === "in") {
       // Down inside the basket, then gone.
       v.y -= GRAVITY * dt;
-      p.y = Math.max(APPLE_R + 0.1, p.y + v.y * dt);
+      p.y = Math.max(BASKET_FLOOR + APPLE_R, p.y + v.y * dt);
       if (this.t > 0.6) this._reset();
     } else if (this.phase === "out") {
       v.y -= GRAVITY * dt;
@@ -419,7 +549,7 @@ class Toss {
       this.holder.scaling.setAll(1);
     }
     this.holder.position.copyFrom(p);
-    this.shadow.position.set(p.x, 0.05, p.z);
+    this.shadow.position.set(p.x, this.phase === "ready" ? STUMP_TOP + 0.02 : 0.05, p.z);
     this.shadow.scaling.setAll(this.phase === "in" ? 0 : Math.max(0.3, 1 - p.y / 14) * this.holder.scaling.x);
   }
 
