@@ -98,6 +98,7 @@ class Grass {
   // wind passes through still, gently turning round), so a change never
   // sends the waves racing.
   update(dt, wind) {
+    dt = Math.min(dt, 0.05); // a long frame (the tab was away) mustn't fling the wind about
     this.time += dt;
     this.windV += (4 * (wind - this.wind) - 4 * this.windV) * dt;
     this.wind += this.windV * dt;

@@ -38,6 +38,18 @@ const EYE_LERP = 7;
 const LOBBY_TIME = 8; // seconds to mill about before the round starts
 const BG_BOTTOM_Y = -8; // bottom edge of the world-space tree background
 const BG_TOP_Y = 170; // tree background extends this high (covers the whole climb)
+// A test (add ?tree=toss to the address): in place of the painted leaves,
+// tree and trunk, the Apple Toss tree cut open down its middle and seen
+// from the front (assets/treecolumn.glb, from appletree.blend's
+// RoyaleColumn scene): its trunk up from the ground, the far half of its
+// canopy's rounded bottom, then the far half of its leafy wall, a piece that
+// repeats exactly, stacked on up for ever. Sizes are the model's.
+const TOSS_TREE = new URLSearchParams(location.search).get("tree") === "toss";
+const COLUMN_SCALE = 1.35;
+const COLUMN_Z = 23; // behind the treetop's cover (20), in front of the lobby's clouds
+const COLUMN_BASE_H = 18; // ground to where the wall starts
+const COLUMN_H = 3 * 2 * Math.PI * 1.3; // one repeat of the wall
+const COLUMN_TILES = 3; // enough to fill the tallest view
 const GO_BANNER_TIME = 0.6; // "GO!" stays up this long after the countdown
 
 // Online (net.js): other apples are drawn this many steps behind the newest
@@ -126,9 +138,9 @@ const CLOUD_RECTS = [
 const CLOUD_COUNT = 10;
 const LOBBY_SKY_TOP = -6; // about where the tree's leaves begin, over the lobby
 // The lobby's grass (grass.js).
-const LOBBY_GRASS = 7000; // blades
-const LOBBY_GRASS_REACH = 32; // either side of the middle
-const APPLE_BODY = 1.7; // how tall an apple stands, without its stem
+const LOBBY_GRASS_PER = 110; // blades to a unit of ground each way
+const LOBBY_GRASS_MOST = 40000;
+const LOBBY_GRASS_REACH = 32; // at most this far either side of the middle
 const CLOUD_W = [2.5, 9]; // world-unit widths, farthest (lowest) to nearest (highest)
 const CLOUD_SPEED = [0.35, 1.5]; // units/s, likewise
 const NAME_KEY = "appleRoyale.name";
@@ -1344,6 +1356,7 @@ class Game {
       scene,
     );
     const titleWords = await BABYLON.SceneLoader.LoadAssetContainerAsync("./assets/", "title.glb", scene);
+    if (TOSS_TREE) await this._buildColumn();
     this._initActionIcon();
     this.faceTextures = {};
     for (const name of FACE_NAMES) {
@@ -1450,21 +1463,21 @@ class Game {
     ground.material = gmat;
     this.lobbyGroundMat = gmat;
 
-    // Grass as in Apple Toss (grass.js), seen side on: a band behind the
-    // apples reaching two thirds of the way up one standing on the ground,
-    // and a band in front, rooted on down to the bottom of the view,
-    // reaching a third. It's drawn with the apples, so it sorts with them.
-    const blades = new Float32Array(16 * LOBBY_GRASS);
-    for (let i = 0; i < LOBBY_GRASS; i++) {
-      const x = (2 * Math.random() - 1) * LOBBY_GRASS_REACH;
-      const wide = 0.14 + 0.1 * Math.random();
-      if (i % 5 < 2) {
-        Grass.blade(blades, i, x, LOBBY_GROUND_Y - 0.05, 1.2 + 1.3 * Math.random(), wide, APPLE_BODY * (0.4 + 0.27 * Math.random()));
-      } else {
-        const root = LOBBY_GROUND_Y - 0.95 * Math.random();
-        const tip = LOBBY_GROUND_Y + APPLE_BODY * (0.1 + 0.23 * Math.random());
-        Grass.blade(blades, i, x, root, -1.2 - 1.3 * Math.random(), wide, tip - root);
-      }
+    // Grass as in Apple Toss (grass.js), seen side on, in front of the
+    // apples and no higher than the ground they stand on: blades of its
+    // full height rooted from the bottom of the lobby's view up, the
+    // topmost with their tips just at the top of the green. Lower ones are
+    // nearer, so they overlap as a lawn does.
+    const cam = this.camera;
+    const depth = LOBBY_GROUND_Y - (LOBBY_CAM_Y - this._lobbyDrop("lobby", 0) + cam.orthoBottom); // of ground in view
+    const reach = Math.min(LOBBY_GRASS_REACH, cam.orthoRight + 3);
+    const count = Math.round(Math.min(LOBBY_GRASS_MOST, LOBBY_GRASS_PER * 2 * reach * Math.max(depth, 1)));
+    const blades = new Float32Array(16 * count);
+    for (let i = 0; i < count; i++) {
+      const tall = 0.6 + 0.6 * Math.random();
+      const down = Math.random(); // 0 just under the top of the green, 1 at the bottom of the view
+      const root = LOBBY_GROUND_Y - tall - down * Math.max(0, depth + 0.2 - tall);
+      Grass.blade(blades, i, (2 * Math.random() - 1) * reach, root, -1.2 - 1.3 * down, 0.14 + 0.1 * Math.random(), tall);
     }
     this.lobbyGrass = new Grass(scene, blades);
     this.lobbyGrass.mesh.renderingGroupId = 2;
@@ -1476,7 +1489,7 @@ class Game {
     // the 20-wide world-tree = 1.83). Both are world-space under an ortho
     // camera, so the match holds on any aspect ratio (mobile or desktop).
     // Built once and kept (not under lobbyRoot), so it stays up through rounds.
-    if (!this.trunk) {
+    if (!this.trunk && !TOSS_TREE) {
       const trunk = BABYLON.MeshBuilder.CreateCylinder(
         "trunk",
         { height: 70, diameter: 1.83, tessellation: 16 },
@@ -2270,6 +2283,7 @@ class Game {
   // On load only its bottom shows at the top of the screen; scrolling the
   // camera up reveals it until it fills the view.
   _buildBgPlane(tex) {
+    if (TOSS_TREE) return;
     for (const p of this.bgPlanes || []) p.dispose();
     if (this.bgMat) this.bgMat.dispose();
 
@@ -2320,6 +2334,7 @@ class Game {
   // Mid tree layer (trunk + closer leaves) — world-space, tall, jagged bottom,
   // a narrow central strip in front of the far background.
   _buildTree(tex) {
+    if (TOSS_TREE) return;
     if (this.treePlane) this.treePlane.dispose();
     if (this.treeMat) this.treeMat.dispose();
 
@@ -2349,6 +2364,24 @@ class Game {
     this.treeStep = tileHeight; // the trunk texture repeats every tile
   }
 
+  // The test tree (TOSS_TREE): its foot standing on the lobby's ground, and
+  // copies of its repeating piece, kept round the view by _updateBgScroll.
+  async _buildColumn() {
+    const scene = this.scene;
+    const c = await BABYLON.SceneLoader.LoadAssetContainerAsync("./assets/", "treecolumn.glb", scene);
+    c.addAllToScene();
+    const column = new BABYLON.TransformNode("column", scene);
+    column.position.set(0, LOBBY_GROUND_Y, COLUMN_Z);
+    column.scaling.setAll(COLUMN_SCALE);
+    column.rotation.y = Math.PI; // its open side to the camera
+    c.rootNodes[0].parent = column;
+    for (const m of c.materials) m.backFaceCulling = false; // the sealed cuts face every way
+    const tile = c.rootNodes[0].getChildren().find((n) => n.name === "column_tile");
+    this.columnTiles = [tile];
+    for (let i = 1; i < COLUMN_TILES; i++) this.columnTiles.push(tile.clone(`column_tile${i}`, tile.parent));
+    for (const m of column.getChildMeshes(false)) m.isPickable = false;
+  }
+
   // Hop the background layers up by whole repeats so the stretch below the
   // view always starts under the camera: the picture is unchanged, but it
   // never ends. 12 clears the tallest canopy-edge rise at the screen sides.
@@ -2357,6 +2390,11 @@ class Game {
     if (this.bgRoot) this.bgRoot.position.y = Math.max(0, Math.floor(below / this.bgStep)) * this.bgStep;
     if (this.treePlane) {
       this.treePlane.position.y = Math.max(0, Math.floor(below / this.treeStep)) * this.treeStep;
+    }
+    if (this.columnTiles) {
+      const wall = LOBBY_GROUND_Y + COLUMN_BASE_H * COLUMN_SCALE; // where the repeats start
+      const first = Math.max(0, Math.floor((this.camera.position.y + this.camera.orthoBottom - wall) / (COLUMN_H * COLUMN_SCALE)));
+      this.columnTiles.forEach((t, i) => (t.position.y = COLUMN_BASE_H + (first + i) * COLUMN_H));
     }
   }
 }

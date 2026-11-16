@@ -37,9 +37,10 @@ goes on — stay in frame to stay alive. The top of the screen is a ceiling
 - Bounce into another apple → you bounce off each other.
 - Land on another apple's **head** → you bounce up and they get squished flat
   and knocked down. Ground-pound onto a head for a harder knockdown.
-- The lobby: Apple Toss's grass (`grass.js`) seen side on, a third of the
-  way up the apples in front of them and two thirds behind, and clouds
-  drifting through the sky under the tree.
+- The lobby: Apple Toss's grass (`grass.js`) seen side on, covering the
+  ground in front of the apples from the bottom of the screen up to the
+  top of the green and no higher, and clouds drifting through the sky
+  under the tree.
 - Win and you get the trophy over the banner: a golden apple on a block of
   wood, its gold plaque engraved "victory royale" (`Trophy` in `royale.js`).
 - Faces react: grimace when stomped, yell while pounding, frown near the
