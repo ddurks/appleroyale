@@ -39,17 +39,19 @@ const LOBBY_TIME = 8; // seconds to mill about before the round starts
 const BG_BOTTOM_Y = -8; // bottom edge of the world-space tree background
 const BG_TOP_Y = 170; // tree background extends this high (covers the whole climb)
 // A test (add ?tree=toss to the address): in place of the painted leaves,
-// tree and trunk, the Apple Toss tree cut open down its middle and seen
-// from the front (assets/treecolumn.glb, from appletree.blend's
-// RoyaleColumn scene): its trunk up from the ground, the far half of its
-// canopy's rounded bottom, then the far half of its leafy wall, a piece that
-// repeats exactly, stacked on up for ever. Sizes are the model's.
+// tree and trunk, the Apple Toss tree opened down its middle and seen from
+// the front (assets/treecolumn.glb, from appletree.blend's RoyaleColumn
+// scene): its trunk up from the ground, the far half of its canopy's
+// rounded bottom, then the far half of its leafy wall, a piece that repeats
+// exactly, stacked on up for ever. It's shown big enough that its sides are
+// past the screen's (_updateBgScroll). Sizes are the model's.
 const TOSS_TREE = new URLSearchParams(location.search).get("tree") === "toss";
-const COLUMN_SCALE = 1.35;
-const COLUMN_Z = 23; // behind the treetop's cover (20), in front of the lobby's clouds
-const COLUMN_BASE_H = 18; // ground to where the wall starts
+const COLUMN_R = 10; // its wall's radius
+const COLUMN_SCALE_MIN = 1.6;
+const COLUMN_Z = 36; // all of it behind the treetop's cover (20), and in front of the lobby's clouds
+const COLUMN_BASE_H = 12.4; // ground to where the wall starts
 const COLUMN_H = 3 * 2 * Math.PI * 1.3; // one repeat of the wall
-const COLUMN_TILES = 3; // enough to fill the tallest view
+const COLUMN_TILES = 3; // enough to fill the tallest view at its smallest
 const GO_BANNER_TIME = 0.6; // "GO!" stays up this long after the countdown
 
 // Online (net.js): other apples are drawn this many steps behind the newest
@@ -140,6 +142,8 @@ const LOBBY_SKY_TOP = -6; // about where the tree's leaves begin, over the lobby
 // The lobby's grass (grass.js).
 const LOBBY_GRASS_PER = 110; // blades to a unit of ground each way
 const LOBBY_GRASS_MOST = 40000;
+const LOBBY_GRASS_BEHIND = 44; // blades to a unit along the row behind the apples
+const APPLE_BODY = 1.7; // how tall an apple stands, without its stem
 const LOBBY_GRASS_REACH = 32; // at most this far either side of the middle
 const CLOUD_W = [2.5, 9]; // world-unit widths, farthest (lowest) to nearest (highest)
 const CLOUD_SPEED = [0.35, 1.5]; // units/s, likewise
@@ -818,19 +822,24 @@ class TitleScreen {
 }
 
 // ─── Trophy ──────────────────────────────────────────────────────────
-// What winning gets you: a golden apple (the apple model, all gold but its
-// face) on a block of wood, a gold plaque on the block's front engraved
-// "victory royale". It stands over the win banner, turning a little from
-// side to side, drawn in front of everything.
+// What winning gets you, in the middle of the screen in place of any
+// words: a golden apple (the apple model, all gold but its face) on a low
+// block of wood with a gold plaque on each side engraved "apple royale",
+// turning round and round, level, in a gold glow; the title's "apple
+// royale" over it. Drawn in front of everything.
 
-const TROPHY_H = 0.26; // its height, in the view's heights
-const TROPHY_BASE = 0.33; // how far down the view its base sits
+const TROPHY_H = 0.2; // the apple and block's height, in the view's heights
+const TROPHY_TALL = 3.64; // …and in the model's units
+const TROPHY_BLOCK = 1.1; // the block's height: the plaque's and a little
+const TROPHY_TURN = 1.3; // radians a second
 
 class Trophy {
-  constructor(game) {
+  constructor(game, wordsContainer) {
     this.game = game;
     const scene = game.scene;
     this.root = new BABYLON.TransformNode("trophy", scene);
+    this.spin = new BABYLON.TransformNode("trophySpin", scene);
+    this.spin.parent = this.root;
     this.t = 0;
 
     const gold = new BABYLON.StandardMaterial("gold", scene);
@@ -841,24 +850,34 @@ class Trophy {
 
     const wood = new BABYLON.StandardMaterial("trophyWood", scene);
     wood.diffuseTexture = new BABYLON.Texture("./assets/bark.png", scene);
+    wood.diffuseTexture.vScale = TROPHY_BLOCK / 2;
     wood.specularColor = BABYLON.Color3.Black();
-    const block = BABYLON.MeshBuilder.CreateBox("trophyBlock", { size: 2 }, scene);
-    block.position.y = 1;
+    const block = BABYLON.MeshBuilder.CreateBox("trophyBlock", { width: 2, depth: 2, height: TROPHY_BLOCK }, scene);
+    block.position.y = TROPHY_BLOCK / 2;
     block.material = wood;
+    block.parent = this.spin;
 
-    // The plaque: a gold plate, and its lettering on a sheet just proud of it.
-    const plate = BABYLON.MeshBuilder.CreateBox("trophyPlate", { width: 1.7, height: 0.9, depth: 0.08 }, scene);
-    plate.position.set(0, 1, -1.03);
-    plate.material = gold;
+    // The plaques: on each side a gold plate, and its lettering on a sheet
+    // just proud of it.
     const tex = new BABYLON.DynamicTexture("trophyText", { width: 512, height: 256 }, scene, true);
-    const words = BABYLON.MeshBuilder.CreatePlane("trophyWords", { width: 1.6, height: 0.8 }, scene);
-    words.position.set(0, 1, -1.075);
     const wordsMat = new BABYLON.StandardMaterial("trophyWordsMat", scene);
     wordsMat.diffuseTexture = tex;
     wordsMat.emissiveColor = new BABYLON.Color3(0.35, 0.35, 0.35);
     wordsMat.specularColor = gold.specularColor;
     wordsMat.specularPower = gold.specularPower;
-    words.material = wordsMat;
+    for (let i = 0; i < 4; i++) {
+      const side = new BABYLON.TransformNode(`trophySide${i}`, scene);
+      side.parent = this.spin;
+      side.rotation.y = (i * Math.PI) / 2;
+      const plate = BABYLON.MeshBuilder.CreateBox("trophyPlate", { width: 1.7, height: 0.9, depth: 0.08 }, scene);
+      plate.position.set(0, TROPHY_BLOCK / 2, -1.03);
+      plate.material = gold;
+      plate.parent = side;
+      const words = BABYLON.MeshBuilder.CreatePlane("trophyWords", { width: 1.6, height: 0.8 }, scene);
+      words.position.set(0, TROPHY_BLOCK / 2, -1.075);
+      words.material = wordsMat;
+      words.parent = side;
+    }
     // Engraved: dark letters with a bright lip along their lower right edge.
     const engrave = () => {
       const ctx = tex.getContext();
@@ -867,13 +886,13 @@ class Trophy {
       const font = (px) => `${px}px "DrawvidHand", "Comic Sans MS", cursive`;
       ctx.font = font(100);
       // As big as fits the plate's width (the font's letters are small for their size).
-      const px = Math.min(190, (100 * 0.84 * 512) / Math.max(ctx.measureText("victory").width, ctx.measureText("royale").width));
+      const px = Math.min(190, (100 * 0.84 * 512) / Math.max(ctx.measureText("apple").width, ctx.measureText("royale").width));
       ctx.font = font(px);
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
       for (const [dx, colour] of [[4, "#f8e08a"], [0, "#6e4a08"]]) {
         ctx.fillStyle = colour;
-        ctx.fillText("victory", 256 + dx, 76 + dx);
+        ctx.fillText("apple", 256 + dx, 76 + dx);
         ctx.fillText("royale", 256 + dx, 180 + dx);
       }
       tex.update();
@@ -882,8 +901,8 @@ class Trophy {
     document.fonts.load('100px "DrawvidHand"').then(engrave); // again once the font is in
 
     const inst = game.appleContainer.instantiateModelsToScene((n) => `trophy_${n}`, false);
-    inst.rootNodes[0].parent = this.root;
-    inst.rootNodes[0].position.y = 2;
+    inst.rootNodes[0].parent = this.spin;
+    inst.rootNodes[0].position.y = TROPHY_BLOCK;
     // Held in the idle's first pose; gold all over but the face and pupils.
     for (const ag of inst.animationGroups) ag.stop();
     const idle = inst.animationGroups.find((ag) => ag.name.toLowerCase().includes("idle"));
@@ -895,7 +914,39 @@ class Trophy {
     for (const m of inst.rootNodes[0].getChildMeshes(false)) {
       if (!/_face$/.test(m.name) && !(m.material && /pupil/i.test(m.material.name))) m.material = gold;
     }
-    for (const m of [block, plate, words]) m.parent = this.root;
+
+    // The title's words over it, half as wide again as the block (as on the
+    // title, the export faces away from our camera).
+    const words = new BABYLON.TransformNode("trophyTitle", scene);
+    words.parent = this.root;
+    wordsContainer.instantiateModelsToScene((n) => `trophyTitle_${n}`, false).rootNodes[0].parent = words;
+    words.rotation.y = Math.PI;
+    for (const m of words.getChildMeshes(false)) m.computeWorldMatrix(true);
+    const { min, max } = words.getHierarchyBoundingVectors();
+    const k = 4.2 / (max.x - min.x);
+    words.scaling.setAll(k);
+    words.position.y = TROPHY_TALL + 0.5 - k * min.y;
+
+    // The glow: a soft gold disc behind it all, breathing a little.
+    const glowTex = new BABYLON.DynamicTexture("trophyGlow", 256, scene, true);
+    const g = glowTex.getContext();
+    const grad = g.createRadialGradient(128, 128, 0, 128, 128, 128);
+    grad.addColorStop(0, "rgba(255, 236, 150, 0.95)");
+    grad.addColorStop(0.35, "rgba(255, 205, 70, 0.55)");
+    grad.addColorStop(1, "rgba(255, 190, 40, 0)");
+    g.fillStyle = grad;
+    g.fillRect(0, 0, 256, 256);
+    glowTex.update();
+    glowTex.hasAlpha = true;
+    const glowMat = new BABYLON.StandardMaterial("trophyGlowMat", scene);
+    glowMat.emissiveTexture = glowTex;
+    glowMat.opacityTexture = glowTex;
+    glowMat.disableLighting = true;
+    this.glow = BABYLON.MeshBuilder.CreatePlane("trophyGlowDisc", { size: 11 }, scene);
+    this.glow.material = glowMat;
+    this.glow.position.set(0, TROPHY_TALL / 2, 3);
+    this.glow.parent = this.root;
+
     for (const m of this.root.getChildMeshes(false)) {
       m.renderingGroupId = 3;
       m.isPickable = false;
@@ -915,9 +966,12 @@ class Trophy {
     const viewH = cam.orthoTop - cam.orthoBottom;
     const viewW = cam.orthoRight - cam.orthoLeft;
     const pop = Math.min(1, this.t / 0.25);
-    this.root.scaling.setAll(Math.min((TROPHY_H * viewH) / 4.6, (0.45 * viewW) / 2.9) * pop * (2 - pop));
-    this.root.position.set(cam.position.x, cam.position.y + cam.orthoTop - TROPHY_BASE * viewH, 0);
-    this.root.rotation.set(-0.3, 0.45 * Math.sin(1.2 * this.t), 0); // tipped to show its top
+    const scale = Math.min((TROPHY_H * viewH) / TROPHY_TALL, (0.55 * viewW) / 4.2);
+    this.root.scaling.setAll(scale * pop * (2 - pop));
+    // The apple and block's middle on the middle of the screen.
+    this.root.position.set(cam.position.x, cam.position.y + (cam.orthoTop + cam.orthoBottom) / 2 - (scale * TROPHY_TALL) / 2, 0);
+    this.spin.rotation.y = TROPHY_TURN * this.t;
+    this.glow.scaling.setAll(1 + 0.06 * Math.sin(2.2 * this.t));
   }
 }
 
@@ -1283,7 +1337,10 @@ class Game {
     this.camera.orthoBottom = -CAMERA_HALF_HEIGHT;
     this.camera.orthoLeft = -halfW;
     this.camera.orthoRight = halfW;
-    if (this.round) this.round.fillAhead = this._fillAhead();
+    if (this.round) {
+      this.round.fillAhead = this._fillAhead();
+      this.round.ceiling = this._ceiling();
+    }
   }
 
   // On touch screens the lobby's ground would sit under the buttons, hiding
@@ -1302,6 +1359,13 @@ class Game {
 
   // Build branches far enough ahead to fill this screen's view (taller on
   // portrait phones). The layout is the same; it's only revealed further up.
+  // A local round's solid top: the top of the screen, however tall the view
+  // (a portrait phone sees twice as far up). Online it's the server's, the
+  // same for everyone.
+  _ceiling() {
+    return Math.max(VIEW_HEIGHT, CAMERA_HALF_HEIGHT + this.camera.orthoTop);
+  }
+
   _fillAhead() {
     return Math.max(VIEW_HEIGHT, CAMERA_HALF_HEIGHT + this.camera.orthoTop) + 6;
   }
@@ -1379,7 +1443,7 @@ class Game {
     });
 
     this.titleScreen = new TitleScreen(this, titleWords);
-    this.trophy = new Trophy(this);
+    this.trophy = new Trophy(this, titleWords);
     this._buildCrown();
     // Clouds over the treetop (the title, and the fall from it): the view's
     // sides, and from the treetop (at z 20; they pass just in front) to the
@@ -1391,7 +1455,7 @@ class Game {
       const bottom = this.crown.position.y;
       return { ...sides(), bottom, top: bottom + 1 + this.camera.orthoTop - this.camera.orthoBottom };
     });
-    this.lobbyClouds = new Clouds(this, 46, () => ({ ...sides(), bottom: LOBBY_GROUND_Y, top: LOBBY_SKY_TOP }));
+    this.lobbyClouds = new Clouds(this, 80, () => ({ ...sides(), bottom: LOBBY_GROUND_Y, top: LOBBY_SKY_TOP }));
     this.lobbyClouds.show(true);
     this.lobbyClouds.scatter();
     this._showTitle();
@@ -1413,7 +1477,7 @@ class Game {
     this._hideTitle();
     this._clearRound();
 
-    this.round = new Round({ seed: (Math.random() * 2 ** 32) >>> 0, fillAhead: this._fillAhead() });
+    this.round = new Round({ seed: (Math.random() * 2 ** 32) >>> 0, fillAhead: this._fillAhead(), ceiling: this._ceiling() });
     this.state = "lobby";
     this.lobbyTimer = LOBBY_TIME;
     this.goTimer = 0;
@@ -1463,16 +1527,22 @@ class Game {
     ground.material = gmat;
     this.lobbyGroundMat = gmat;
 
-    // Grass as in Apple Toss (grass.js), seen side on, in front of the
-    // apples and no higher than the ground they stand on: blades of its
-    // full height rooted from the bottom of the lobby's view up, the
-    // topmost with their tips just at the top of the green. Lower ones are
-    // nearer, so they overlap as a lawn does.
+    // Grass as in Apple Toss (grass.js), seen side on. In front of the
+    // apples, no higher than the ground they stand on: blades of its full
+    // height rooted from the bottom of the lobby's view up, the topmost
+    // with their tips just at the top of the green; lower ones are nearer,
+    // so they overlap as a lawn does. And behind the apples a row standing
+    // on the top of the green, two thirds of the way up them, so the
+    // ground reads as having depth.
     const cam = this.camera;
     const depth = LOBBY_GROUND_Y - (LOBBY_CAM_Y - this._lobbyDrop("lobby", 0) + cam.orthoBottom); // of ground in view
     const reach = Math.min(LOBBY_GRASS_REACH, cam.orthoRight + 3);
     const count = Math.round(Math.min(LOBBY_GRASS_MOST, LOBBY_GRASS_PER * 2 * reach * Math.max(depth, 1)));
-    const blades = new Float32Array(16 * count);
+    const behind = Math.round(LOBBY_GRASS_BEHIND * 2 * reach);
+    const blades = new Float32Array(16 * (count + behind));
+    for (let i = 0; i < behind; i++) {
+      Grass.blade(blades, count + i, (2 * Math.random() - 1) * reach, LOBBY_GROUND_Y - 0.05, 1.2 + 1.3 * Math.random(), 0.14 + 0.1 * Math.random(), APPLE_BODY * (0.4 + 0.27 * Math.random()));
+    }
     for (let i = 0; i < count; i++) {
       const tall = 0.6 + 0.6 * Math.random();
       const down = Math.random(); // 0 just under the top of the green, 1 at the bottom of the view
@@ -1562,7 +1632,7 @@ class Game {
 
     const r = this.round;
     this.camera.position.y = fallY ?? this.prevCamY + (r.cameraY - this.prevCamY) * alpha - this._lobbyDrop(r.phase, r.transT);
-    this.ceilingY = r.scrollY + VIEW_HEIGHT; // the core's ceiling (+ the apple's top)
+    this.ceilingY = r.scrollY + r.ceiling; // the core's ceiling (+ the apple's top)
     for (const v of this.views) v.render(dt, alpha);
     this._syncBranches(alpha);
     this._updateCameraX(dt);
@@ -1617,9 +1687,9 @@ class Game {
       this.input.consumeRestart(); // drop a stale press/tap from mid-round
       const w = this.views[this.round.winner];
       this.youWon = !!w && w.isHuman; // the trophy comes out
-      const msg = w ? (w.isHuman ? "You win!" : `${this._nameOf(w.index)} wins`) : "Draw";
+      const msg = w ? `${this._nameOf(w.index)} wins` : "Draw";
       const touch = matchMedia("(hover: none) and (pointer: coarse)").matches;
-      this.setBanner(`${msg}  —  ${touch ? "tap" : "press R"} to restart`);
+      this.setBanner(this.youWon ? "" : `${msg}  —  ${touch ? "tap" : "press R"} to restart`); // the trophy says it
     }
   }
 
@@ -1786,8 +1856,8 @@ class Game {
     else if (phase === "over") {
       const w = this.online.mirror.winner;
       this.youWon = w === this.humanIdx;
-      const msg = w === this.humanIdx ? "You win!" : w >= 0 ? `${this._nameOf(w)} wins` : "Draw";
-      this.setBanner(`${msg}  —  next round soon`);
+      const msg = w >= 0 ? `${this._nameOf(w)} wins` : "Draw";
+      this.setBanner(this.youWon ? "" : `${msg}  —  next round soon`);
     }
   }
 
@@ -2372,11 +2442,11 @@ class Game {
     c.addAllToScene();
     const column = new BABYLON.TransformNode("column", scene);
     column.position.set(0, LOBBY_GROUND_Y, COLUMN_Z);
-    column.scaling.setAll(COLUMN_SCALE);
     column.rotation.y = Math.PI; // its open side to the camera
     c.rootNodes[0].parent = column;
     for (const m of c.materials) m.backFaceCulling = false; // the sealed cuts face every way
     const tile = c.rootNodes[0].getChildren().find((n) => n.name === "column_tile");
+    this.column = column;
     this.columnTiles = [tile];
     for (let i = 1; i < COLUMN_TILES; i++) this.columnTiles.push(tile.clone(`column_tile${i}`, tile.parent));
     for (const m of column.getChildMeshes(false)) m.isPickable = false;
@@ -2392,8 +2462,11 @@ class Game {
       this.treePlane.position.y = Math.max(0, Math.floor(below / this.treeStep)) * this.treeStep;
     }
     if (this.columnTiles) {
-      const wall = LOBBY_GROUND_Y + COLUMN_BASE_H * COLUMN_SCALE; // where the repeats start
-      const first = Math.max(0, Math.floor((this.camera.position.y + this.camera.orthoBottom - wall) / (COLUMN_H * COLUMN_SCALE)));
+      // Wide enough for the view, whatever its shape, with room to spare.
+      const scale = Math.max(COLUMN_SCALE_MIN, (this.camera.orthoRight + 3) / COLUMN_R);
+      this.column.scaling.setAll(scale);
+      const wall = LOBBY_GROUND_Y + COLUMN_BASE_H * scale; // where the repeats start
+      const first = Math.max(0, Math.floor((this.camera.position.y + this.camera.orthoBottom - wall) / (COLUMN_H * scale)));
       this.columnTiles.forEach((t, i) => (t.position.y = COLUMN_BASE_H + (first + i) * COLUMN_H));
     }
   }

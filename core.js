@@ -296,7 +296,7 @@
       let ny = this.y + this.vy * dt;
       // While playing, the top of the view is solid: bonk and fall back.
       if (phase === "playing") {
-        const ceil = round.scrollY + C.VIEW_HEIGHT - C.APPLE_TOP;
+        const ceil = round.scrollY + round.ceiling - C.APPLE_TOP;
         if (ny > ceil) {
           ny = ceil;
           if (this.vy > 0) this.vy = 0;
@@ -463,6 +463,7 @@
       this.seed = opts.seed >>> 0;
       this.n = opts.numApples || C.NUM_APPLES;
       this.fillAhead = opts.fillAhead || C.VIEW_HEIGHT + 6;
+      this.ceiling = opts.ceiling || C.VIEW_HEIGHT; // how far above the floor the solid top is
       this.layout = (opts.layout || ROWS_LAYOUT).create(mulberry32(this.seed), C);
       this.apples = [];
       this.branches = [];
