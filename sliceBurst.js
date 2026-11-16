@@ -111,7 +111,9 @@
     }
 
     // Knock the apple apart at `center`: each piece flies on its own arc and
-    // tumbles; nothing collides.
+    // tumbles; nothing collides. With options.restY(x, z) (the height of the
+    // floor there) a piece falling to it stops and is handed to
+    // options.onRest(mesh), whose it is from then on.
     burst(options = {}) {
       if (!this.templateRoot) {
         void this.preload();
@@ -130,6 +132,7 @@
       const lifetimeMs = options.lifetimeMs ?? 2200;
       const completeBelowY = options.completeBelowY;
       const onComplete = options.onComplete || null;
+      const restY = options.restY || null;
       const mass = options.mass ?? 0.18;
       const gravity = options.gravity ?? -20;
       const lerp = BABYLON.Scalar.Lerp;
@@ -175,14 +178,19 @@
       observer = this.scene.onBeforeRenderObservable.add(() => {
         const dt = Math.min(this.scene.getEngine().getDeltaTime() / 1000, 0.05);
         let allBelow = typeof completeBelowY === "number";
-        for (const piece of pieces) {
+        for (let i = pieces.length - 1; i >= 0; i--) {
+          const piece = pieces[i];
           piece.vel.y += gravity * dt;
           piece.mesh.position.addInPlace(piece.vel.scale(dt));
           piece.mesh.rotate(piece.axis, piece.spin * dt, BABYLON.Space.WORLD);
           piece.spin *= 1 - HAND_SPIN_DAMPING * dt;
           if (piece.mesh.position.y >= completeBelowY) allBelow = false;
+          if (restY && piece.vel.y < 0 && piece.mesh.position.y <= restY(piece.mesh.position.x, piece.mesh.position.z)) {
+            pieces.splice(i, 1);
+            options.onRest(piece.mesh);
+          }
         }
-        if (allBelow) finish();
+        if (allBelow || (restY && !pieces.length)) finish();
       });
       const cleanupTimer = setTimeout(finish, lifetimeMs);
 

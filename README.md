@@ -64,6 +64,9 @@ outlines, so what it hits is exactly what you see. The apple is a rigid
 body whose hull is its own vertices in the pose it was thrown in: it can
 glance off the rim, bounce in or out, and only counts once it comes to rest
 inside. Each apple drops onto the stump stretched and squashes as it lands.
+A miss bursts into slices where it hits the ground, and the slices stay
+where they fall, piling up (`SlicePile`: each slice at rest is one more
+copy of its shape, so the pile costs nothing until another lands).
 The grass is single blades bent by the wind in a shader (`Grass` in
 `toss.js`).
 The apple waits on a stump among four trees, under the title screen's
@@ -86,13 +89,19 @@ branches, Temple Run style. The apple rolls on by itself, faster and faster,
 along straights laid out at random that end in a corner. Swipe left / right
 to take a corner, up to jump a gap, down to duck a leafy bough (arrow keys
 or WASD on a keyboard). The score is how far you got. The apple stretches
-tall as it leaves the branch on a jump.
+tall as it leaves the branch on a jump. Every way out ends in slices, as
+in Royale: at once against a bough, against the cut end of the branch
+across a gap, and tossed back up into view after falling off a corner.
 You're a small apple deep inside the tree: the branches are bark-textured
 limbs built in `run.js` (`limbMesh`), with twigs, smooth bends at the corners
 and great limbs rising out of the dark, each joined to the branch by a
-smaller one curving across into its side; the leaves are clumps of
-`assets/leaf.glb` laid like the Apple Toss tree's, faces out and tips
-hanging, so they overlap like shingles. All round is the Apple Toss tree
+smaller one: more often than not forking off the limb well below and
+climbing at a slant to meet the branch from underneath, otherwise curving
+across into its side; the leaves (`assets/leaf.glb`,
+big: two and a half apples long) grow along the twigs' outer halves one
+after another, turning round the twig as they go, with a fan at the tip
+(`leafSprig`), and elsewhere in clumps laid like the Apple Toss tree's,
+faces out and tips hanging, so they overlap like shingles. All round is the Apple Toss tree
 from inside (`assets/tosstree_inside.glb`: no solid ball or trunk, each
 leaf mirrored through the canopy so its face turns in, tip still hanging)
 seen from the middle of its canopy, drawn once into a cube when the page
