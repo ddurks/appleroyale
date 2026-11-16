@@ -11,14 +11,14 @@ const START = new V3(0, APPLE_R, 0);
 
 // The basket: how far away, and how long the throw takes to get there.
 const DISTS = [
-  { name: "Near", z: 10, time: 1.0 },
-  { name: "Mid", z: 15, time: 1.15 },
-  { name: "Far", z: 21, time: 1.3 },
+  { name: "Near", z: 20, time: 1.25 },
+  { name: "Mid", z: 28, time: 1.45 },
+  { name: "Far", z: 37, time: 1.65 },
 ];
-const BASKET_H = 2.0;
-const RIM_R = 1.55;
-const BASE_R = 1.2;
-const IN_R = RIM_R - 0.4; // the apple's centre this close to the middle goes in
+const BASKET_H = 2.6;
+const RIM_R = 2.1;
+const BASE_R = 1.6;
+const IN_R = RIM_R - 0.45; // the apple's centre this close to the middle goes in
 const RIM_HIT_R = RIM_R + 0.75; // …this close clips the rim and bounces away
 
 const WIND_MAX = 5; // the number shown
@@ -29,6 +29,123 @@ const FLICK_MAX_MS = 700;
 
 const FACES = ["elated", "o", "frown", "grimace", "woah"];
 const LEAVES = 14;
+
+// ─── Grass ───────────────────────────────────────────────────────────
+// A field of single blades (one mesh, drawn once per blade), bent in the
+// vertex shader: a steady lean downwind, gusts rolling across the field the
+// way the wind blows, and each blade's own flutter. Blades are sown where
+// the camera looks, thinning with distance so the screen is evenly covered.
+
+const GRASS_BLADES = 60000;
+const GRASS_FAR = 140; // how far from the camera the field reaches
+const GRASS_SOIL = "#3a7d24"; // the ground between the blades
+
+BABYLON.Effect.ShadersStore.grassVertexShader = `
+precision highp float;
+attribute vec3 position;
+attribute vec2 uv;
+#include<instancesDeclaration>
+uniform mat4 viewProjection;
+uniform float time;
+uniform float wind;
+varying float vUp;
+varying float vTint;
+varying float vGust;
+void main() {
+#include<instancesVertex>
+  vec3 root = finalWorld[3].xyz;
+  float tall = length(finalWorld[1].xyz);
+  float rnd = fract(sin(dot(root.xz, vec2(12.9898, 78.233))) * 43758.5453);
+  float up = uv.y; // 0 at the root, 1 at the tip
+  float way = wind < 0.0 ? -1.0 : 1.0;
+  float hard = abs(wind);
+  // Gusts: two bands of waves travelling downwind, a wide one and a ripple.
+  float along = root.x * way;
+  float gust = 0.6 * sin(0.22 * along + 0.13 * root.z - time * (0.9 + 0.5 * hard))
+             + 0.4 * sin(0.7 * along - 0.45 * root.z - time * (1.6 + 0.8 * hard) + 6.28 * rnd * 0.15);
+  gust = 0.5 + 0.5 * gust;
+  float lean = way * hard * (0.07 + 0.11 * gust) + 0.05 * sin(time * (2.5 + 3.0 * rnd) + 6.28 * rnd) * (0.6 + 0.25 * hard);
+  float sway = 0.04 * sin(time * (1.7 + 2.0 * rnd) + 4.0 * rnd);
+  vec4 p = finalWorld * vec4(position, 1.0);
+  float bend = up * up * tall;
+  p.x += lean * bend;
+  p.z += sway * bend;
+  p.y -= (1.0 - cos(min(abs(lean), 1.3))) * bend; // a bent blade is lower
+  vUp = up;
+  vTint = rnd;
+  vGust = gust * min(hard / 3.0, 1.0);
+  gl_Position = viewProjection * p;
+}`;
+BABYLON.Effect.ShadersStore.grassFragmentShader = `
+precision highp float;
+varying float vUp;
+varying float vTint;
+varying float vGust;
+void main() {
+  vec3 low = vec3(0.09, 0.27, 0.06);
+  vec3 high = mix(vec3(0.36, 0.68, 0.18), vec3(0.52, 0.78, 0.24), vTint);
+  vec3 c = mix(low, high, vUp * vUp * 0.4 + vUp * 0.6);
+  c += vec3(0.10, 0.11, 0.04) * vGust * vUp; // gusts show as paler bands
+  gl_FragColor = vec4(c, 1.0);
+}`;
+
+class Grass {
+  constructor(scene, camPos) {
+    // One blade: a tapering strip, curved a little, a unit tall and wide.
+    const LEVELS = 4;
+    const positions = [];
+    const uvs = [];
+    const indices = [];
+    for (let i = 0; i <= LEVELS; i++) {
+      const t = i / LEVELS;
+      const half = 0.5 * (1 - 0.9 * t);
+      positions.push(-half, t, 0.25 * t * t, half, t, 0.25 * t * t);
+      uvs.push(0, t, 1, t);
+      if (i < LEVELS) indices.push(2 * i, 2 * i + 1, 2 * i + 2, 2 * i + 1, 2 * i + 3, 2 * i + 2);
+    }
+    const blade = new BABYLON.Mesh("grass", scene);
+    const vd = new BABYLON.VertexData();
+    vd.positions = positions;
+    vd.uvs = uvs;
+    vd.indices = indices;
+    vd.applyToMesh(blade);
+
+    // Sown through the wedge the camera sees, evenly by how far away (so
+    // near ground, which fills more of the screen, gets more blades).
+    const m = new Float32Array(16 * GRASS_BLADES);
+    for (let i = 0; i < GRASS_BLADES; i++) {
+      const away = 1.5 * Math.pow(GRASS_FAR / 1.5, Math.random());
+      const x = camPos.x + (2 * Math.random() - 1) * (2 + 0.8 * away);
+      const z = camPos.z + away;
+      const yaw = 6.28 * Math.random();
+      const wide = 0.07 + 0.05 * Math.random() + 0.0015 * away; // far blades a little wider, to fill in
+      const tall = 0.3 + 0.3 * Math.random();
+      const c = Math.cos(yaw);
+      const s = Math.sin(yaw);
+      m.set([c * wide, 0, -s * wide, 0, 0, tall, 0, 0, s * tall, 0, c * tall, 0, x, 0, z, 1], 16 * i);
+    }
+    blade.thinInstanceSetBuffer("matrix", m, 16, true);
+    blade.alwaysSelectAsActiveMesh = true;
+    blade.isPickable = false;
+
+    this.mat = new BABYLON.ShaderMaterial("grassMat", scene, "grass", {
+      attributes: ["position", "uv"],
+      uniforms: ["world", "viewProjection", "time", "wind"],
+    });
+    this.mat.backFaceCulling = false;
+    blade.material = this.mat;
+    this.time = 0;
+    this.wind = 0;
+  }
+
+  // The wind eases to its new strength rather than snapping.
+  update(dt, wind) {
+    this.time += dt;
+    this.wind += (wind - this.wind) * Math.min(1, 2 * dt);
+    this.mat.setFloat("time", this.time);
+    this.mat.setFloat("wind", this.wind);
+  }
+}
 
 class Toss {
   constructor(canvas) {
@@ -64,10 +181,10 @@ class Toss {
       return m;
     };
     const ground = BABYLON.MeshBuilder.CreateGround("ground", { width: 400, height: 400 }, scene);
-    ground.material = flat("grass", "#4f9a3a");
+    ground.material = flat("soil", GRASS_SOIL);
+    this.grass = new Grass(scene, this.camera.position);
 
     this._buildBasket(flat);
-    this._buildLeaves(flat("windLeaf", "#f0c23c"));
 
     // Blob shadow under the apple: where it is over the ground.
     this.shadow = BABYLON.MeshBuilder.CreateDisc("shadow", { radius: APPLE_R, tessellation: 24 }, scene);
@@ -81,6 +198,7 @@ class Toss {
       BABYLON.SceneLoader.LoadAssetContainerAsync("./assets/", "tree.glb", scene),
     ]);
     this._addTree(tree, flat("bark", "#65493A"));
+    this._buildLeaves();
     this._addApple(apple);
 
     this._setDist(this.distIdx);
@@ -119,17 +237,17 @@ class Toss {
     for (const m of [side, rim, shade]) m.parent = this.basket;
   }
 
-  // Loose leaves on the wind: how they blow is how the apple will drift.
-  _buildLeaves(mat) {
-    mat.backFaceCulling = false;
-    mat.emissiveColor = mat.diffuseColor;
-    mat.disableLighting = true;
+  // Loose leaves on the wind (copies of one of the tree's): how they blow
+  // is how the apple will drift.
+  _buildLeaves() {
+    const src = this.tree.getChildMeshes(false).find((m) => m.name === "tree_leaf");
     this.leaves = [];
     for (let i = 0; i < LEAVES; i++) {
-      const mesh = BABYLON.MeshBuilder.CreateDisc(`windLeaf${i}`, { radius: 0.28, tessellation: 6 }, this.scene);
-      mesh.scaling.x = 0.5;
-      mesh.material = mat;
-      mesh.position.set(-14 + 28 * Math.random(), 1 + 8 * Math.random(), 2 + 22 * Math.random());
+      const mesh = src.createInstance(`windLeaf${i}`);
+      mesh.parent = null;
+      mesh.rotationQuaternion = null;
+      mesh.scaling.copyFrom(src.absoluteScaling).scaleInPlace(0.8);
+      mesh.position.set(-16 + 32 * Math.random(), 1 + 9 * Math.random(), 8 + 36 * Math.random());
       this.leaves.push({ mesh, phase: 6.28 * Math.random(), spin: 2 + 3 * Math.random() });
     }
   }
@@ -140,6 +258,7 @@ class Toss {
     for (const m of root.getChildMeshes(false)) {
       m.isPickable = false;
       if (/_tree$/.test(m.name)) m.material = bark;
+      else if (m.material) m.material.backFaceCulling = false; // leaves show both sides
     }
     this.tree = root;
   }
@@ -265,8 +384,9 @@ class Toss {
   }
 
   _update(dt) {
-    this._blowLeaves(dt);
+    this.grass.update(dt, this.wind);
     if (!this.holder) return;
+    this._blowLeaves(dt);
     const p = this.pos;
     const v = this.vel;
     this.t += dt;
@@ -299,7 +419,7 @@ class Toss {
       this.holder.scaling.setAll(1);
     }
     this.holder.position.copyFrom(p);
-    this.shadow.position.set(p.x, 0.03, p.z);
+    this.shadow.position.set(p.x, 0.05, p.z);
     this.shadow.scaling.setAll(this.phase === "in" ? 0 : Math.max(0.3, 1 - p.y / 14) * this.holder.scaling.x);
   }
 
@@ -339,9 +459,9 @@ class Toss {
       m.position.y += (0.5 * Math.sin(l.phase * 1.7) - 0.25) * dt;
       m.rotation.x += l.spin * dt;
       m.rotation.z += 0.6 * l.spin * dt;
-      if (m.position.x > 14) m.position.x -= 28;
-      if (m.position.x < -14) m.position.x += 28;
-      if (m.position.y < 0.3) m.position.y = 9;
+      if (m.position.x > 16) m.position.x -= 32;
+      if (m.position.x < -16) m.position.x += 32;
+      if (m.position.y < 0.6) m.position.y = 10;
     }
   }
 }

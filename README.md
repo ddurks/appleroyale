@@ -56,8 +56,18 @@ basket under the tree, Paper Toss style. Only the flick's direction counts;
 the wind (the arrow and number, and the loose leaves) pushes the apple
 sideways in flight, so aim into it. Baskets in a row are the score; a miss
 starts over. **Near / Mid / Far** moves the basket, each with its own best.
+The grass is single blades bent by the wind in a shader (`Grass` in
+`toss.js`).
 The tree is `assets/tree.glb`, exported from `appletree.blend` (the tree,
 its leaves and hanging apples; modifiers applied).
+
+## Apple Run
+
+`run.html` (**Apple Run** on the title screen): roll along the tree's
+branches, Temple Run style. The apple rolls on by itself, faster and faster,
+along straights laid out at random that end in a corner. Swipe left / right
+to take a corner, up to jump a gap, down to duck a leafy bough (arrow keys
+or WASD on a keyboard). The score is how far you got.
 
 ## Online
 
