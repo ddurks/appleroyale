@@ -37,6 +37,8 @@ goes on — stay in frame to stay alive. The top of the screen is a ceiling
 - Bounce into another apple → you bounce off each other.
 - Land on another apple's **head** → you bounce up and they get squished flat
   and knocked down. Ground-pound onto a head for a harder knockdown.
+- Win and you get the trophy over the banner: a golden apple on a block of
+  wood, its gold plaque engraved "victory royale" (`Trophy` in `royale.js`).
 - Faces react: grimace when stomped, yell while pounding, frown near the
   bottom of the screen, "o" while rising, grin near the top.
 - The rules live in `core.js` (no graphics; fixed 1/60 s steps), shared by
@@ -52,10 +54,16 @@ goes on — stay in frame to stay alive. The top of the screen is a ceiling
 ## Apple Toss
 
 `toss.html` (**Apple Toss** on the title screen): flick the apple into the
-basket under the tree, Paper Toss style. Only the flick's direction counts;
+bucket under the tree, Paper Toss style. Only the flick's direction counts;
 the wind (the arrow and number, and the loose leaves) pushes the apple
-sideways in flight, so aim into it. Baskets in a row are the score; a miss
-starts over. **Near / Mid / Far** moves the basket, each with its own best.
+sideways in flight, so aim into it. Buckets in a row are the score; a miss
+starts over. **Near / Mid / Far** moves the bucket, each with its own best.
+The bucket (wooden staves, iron hoops, textures drawn in code) is built by
+sweeping outlines round its axis, and the apple collides with those same
+outlines, so what it hits is exactly what you see. The apple is a rigid
+body whose hull is its own vertices in the pose it was thrown in: it can
+glance off the rim, bounce in or out, and only counts once it comes to rest
+inside. Each apple drops onto the stump stretched and squashes as it lands.
 The grass is single blades bent by the wind in a shader (`Grass` in
 `toss.js`).
 The apple waits on a stump among four trees, under the title screen's
@@ -63,10 +71,13 @@ clouds. The tree (`assets/tosstree.glb`: a simple trunk under a ball of
 shingled leaves, as one mesh with lighter leaves), the stump
 (`assets/stump.glb`) and the loose leaf (`assets/leaf.glb`) come from the
 **TossTree** scene in `appletree.blend`; the bark is `assets/bark.png`.
-The grass is single blades bent by the wind in a shader (`Grass` in
-`toss.js`).
-The tree is `assets/tree.glb`, exported from `appletree.blend` (the tree,
-its leaves and hanging apples; modifiers applied).
+The leaves are vertex-painted (the `LeafPaint` colour attribute and the
+`leaf_painted` material: lighter blade, darker edges, a dark crease down the
+midrib and fainter ones along the veins) so their shape shows under plain
+lighting. The trees are exported with each leaf decimated to 70 vertices
+(`Cube.005_lo`, `Cube.100_lo`), joined into one mesh and raised so the
+trunk's foot is at 0; `tosstree_inside.glb` is the same without the ball
+and trunk and with the leaves turned in.
 
 ## Apple Run
 
@@ -74,7 +85,20 @@ its leaves and hanging apples; modifiers applied).
 branches, Temple Run style. The apple rolls on by itself, faster and faster,
 along straights laid out at random that end in a corner. Swipe left / right
 to take a corner, up to jump a gap, down to duck a leafy bough (arrow keys
-or WASD on a keyboard). The score is how far you got.
+or WASD on a keyboard). The score is how far you got. The apple stretches
+tall as it leaves the branch on a jump.
+You're a small apple deep inside the tree: the branches are bark-textured
+limbs built in `run.js` (`limbMesh`), with twigs, smooth bends at the corners
+and great limbs rising out of the dark, each joined to the branch by a
+smaller one curving across into its side; the leaves are clumps of
+`assets/leaf.glb` laid like the Apple Toss tree's, faces out and tips
+hanging, so they overlap like shingles. All round is the Apple Toss tree
+from inside (`assets/tosstree_inside.glb`: no solid ball or trunk, each
+leaf mirrored through the canopy so its face turns in, tip still hanging)
+seen from the middle of its canopy, drawn once into a cube when the page
+loads: sky through the gaps above, grass far below. The wood and
+leaves fade into it with distance, sooner the deeper they are. Each apple drops onto the
+branch stretched and squashes as it lands.
 
 ## Online
 

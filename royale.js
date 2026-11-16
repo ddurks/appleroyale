@@ -800,6 +800,110 @@ class TitleScreen {
   }
 }
 
+// ─── Trophy ──────────────────────────────────────────────────────────
+// What winning gets you: a golden apple (the apple model, all gold but its
+// face) on a block of wood, a gold plaque on the block's front engraved
+// "victory royale". It stands over the win banner, turning a little from
+// side to side, drawn in front of everything.
+
+const TROPHY_H = 0.26; // its height, in the view's heights
+const TROPHY_BASE = 0.33; // how far down the view its base sits
+
+class Trophy {
+  constructor(game) {
+    this.game = game;
+    const scene = game.scene;
+    this.root = new BABYLON.TransformNode("trophy", scene);
+    this.t = 0;
+
+    const gold = new BABYLON.StandardMaterial("gold", scene);
+    gold.diffuseColor = new BABYLON.Color3(0.85, 0.62, 0.1);
+    gold.emissiveColor = new BABYLON.Color3(0.35, 0.24, 0.02);
+    gold.specularColor = new BABYLON.Color3(1, 0.95, 0.6);
+    gold.specularPower = 20;
+
+    const wood = new BABYLON.StandardMaterial("trophyWood", scene);
+    wood.diffuseTexture = new BABYLON.Texture("./assets/bark.png", scene);
+    wood.specularColor = BABYLON.Color3.Black();
+    const block = BABYLON.MeshBuilder.CreateBox("trophyBlock", { size: 2 }, scene);
+    block.position.y = 1;
+    block.material = wood;
+
+    // The plaque: a gold plate, and its lettering on a sheet just proud of it.
+    const plate = BABYLON.MeshBuilder.CreateBox("trophyPlate", { width: 1.7, height: 0.9, depth: 0.08 }, scene);
+    plate.position.set(0, 1, -1.03);
+    plate.material = gold;
+    const tex = new BABYLON.DynamicTexture("trophyText", { width: 512, height: 256 }, scene, true);
+    const words = BABYLON.MeshBuilder.CreatePlane("trophyWords", { width: 1.6, height: 0.8 }, scene);
+    words.position.set(0, 1, -1.075);
+    const wordsMat = new BABYLON.StandardMaterial("trophyWordsMat", scene);
+    wordsMat.diffuseTexture = tex;
+    wordsMat.emissiveColor = new BABYLON.Color3(0.35, 0.35, 0.35);
+    wordsMat.specularColor = gold.specularColor;
+    wordsMat.specularPower = gold.specularPower;
+    words.material = wordsMat;
+    // Engraved: dark letters with a bright lip along their lower right edge.
+    const engrave = () => {
+      const ctx = tex.getContext();
+      ctx.fillStyle = "#d9a520";
+      ctx.fillRect(0, 0, 512, 256);
+      const font = (px) => `${px}px "DrawvidHand", "Comic Sans MS", cursive`;
+      ctx.font = font(100);
+      // As big as fits the plate's width (the font's letters are small for their size).
+      const px = Math.min(190, (100 * 0.84 * 512) / Math.max(ctx.measureText("victory").width, ctx.measureText("royale").width));
+      ctx.font = font(px);
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      for (const [dx, colour] of [[4, "#f8e08a"], [0, "#6e4a08"]]) {
+        ctx.fillStyle = colour;
+        ctx.fillText("victory", 256 + dx, 76 + dx);
+        ctx.fillText("royale", 256 + dx, 180 + dx);
+      }
+      tex.update();
+    };
+    engrave();
+    document.fonts.load('100px "DrawvidHand"').then(engrave); // again once the font is in
+
+    const inst = game.appleContainer.instantiateModelsToScene((n) => `trophy_${n}`, false);
+    inst.rootNodes[0].parent = this.root;
+    inst.rootNodes[0].position.y = 2;
+    // Held in the idle's first pose; gold all over but the face and pupils.
+    for (const ag of inst.animationGroups) ag.stop();
+    const idle = inst.animationGroups.find((ag) => ag.name.toLowerCase().includes("idle"));
+    if (idle) {
+      idle.start(true);
+      idle.goToFrame(idle.from);
+      idle.pause();
+    }
+    for (const m of inst.rootNodes[0].getChildMeshes(false)) {
+      if (!/_face$/.test(m.name) && !(m.material && /pupil/i.test(m.material.name))) m.material = gold;
+    }
+    for (const m of [block, plate, words]) m.parent = this.root;
+    for (const m of this.root.getChildMeshes(false)) {
+      m.renderingGroupId = 3;
+      m.isPickable = false;
+    }
+    this.root.setEnabled(false);
+  }
+
+  // Shown (popping in) while on; sized and placed by the camera's view.
+  update(dt, on) {
+    this.root.setEnabled(on);
+    if (!on) {
+      this.t = 0;
+      return;
+    }
+    this.t += dt;
+    const cam = this.game.camera;
+    const viewH = cam.orthoTop - cam.orthoBottom;
+    const viewW = cam.orthoRight - cam.orthoLeft;
+    const pop = Math.min(1, this.t / 0.25);
+    this.root.scaling.setAll(Math.min((TROPHY_H * viewH) / 4.6, (0.45 * viewW) / 2.9) * pop * (2 - pop));
+    this.root.position.set(cam.position.x, cam.position.y + cam.orthoTop - TROPHY_BASE * viewH, 0);
+    this.root.rotation.set(-0.3, 0.45 * Math.sin(1.2 * this.t), 0); // tipped to show its top
+  }
+}
+
 // ─── Clouds ──────────────────────────────────────────────────────────
 // The sky above the treetop, on the title and the fall from it: clouds
 // drifting left to right. Lower ones are farther away (smaller, slower,
@@ -1261,9 +1365,11 @@ class Game {
     scene.onAfterAnimationsObservable.add(() => {
       const dt = this.engine.getDeltaTime() / 1000;
       for (const v of this.views) v.updateEyes(dt);
+      if (this.trophy) this.trophy.update(dt, this.state === "over" && this.youWon);
     });
 
     this.titleScreen = new TitleScreen(this, titleWords);
+    this.trophy = new Trophy(this);
     this._buildCrown();
     this.clouds = new Clouds(this);
     this._showTitle();
@@ -1493,7 +1599,8 @@ class Game {
       this.state = "over";
       this.input.consumeRestart(); // drop a stale press/tap from mid-round
       const w = this.views[this.round.winner];
-      const msg = w ? (w.isHuman ? "🏆 You win!" : `${this._nameOf(w.index)} wins`) : "Draw";
+      this.youWon = !!w && w.isHuman; // the trophy comes out
+      const msg = w ? (w.isHuman ? "You win!" : `${this._nameOf(w.index)} wins`) : "Draw";
       const touch = matchMedia("(hover: none) and (pointer: coarse)").matches;
       this.setBanner(`${msg}  —  ${touch ? "tap" : "press R"} to restart`);
     }
@@ -1661,7 +1768,8 @@ class Game {
     else if (phase === "playing") this.goTimer = GO_BANNER_TIME;
     else if (phase === "over") {
       const w = this.online.mirror.winner;
-      const msg = w === this.humanIdx ? "🏆 You win!" : w >= 0 ? `${this._nameOf(w)} wins` : "Draw";
+      this.youWon = w === this.humanIdx;
+      const msg = w === this.humanIdx ? "You win!" : w >= 0 ? `${this._nameOf(w)} wins` : "Draw";
       this.setBanner(`${msg}  —  next round soon`);
     }
   }
