@@ -49,6 +49,16 @@ goes on — stay in frame to stay alive. The top of the screen is a ceiling
   from the font by `tools/title_glb.py` (see its header). The bots run
   the trained policy in `bots.js` (see `bots/TIERS.md`).
 
+## Apple Toss
+
+`toss.html` (**Apple Toss** on the title screen): flick the apple into the
+basket under the tree, Paper Toss style. Only the flick's direction counts;
+the wind (the arrow and number, and the loose leaves) pushes the apple
+sideways in flight, so aim into it. Baskets in a row are the score; a miss
+starts over. **Near / Mid / Far** moves the basket, each with its own best.
+The tree is `assets/tree.glb`, exported from `appletree.blend` (the tree,
+its leaves and hanging apples; modifiers applied).
+
 ## Online
 
 **Online** on the title screen

@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1" />
+    <title>apple toss</title>
+    <link rel="icon" type="image/png" href="assets/favicon.png" />
+    <link rel="apple-touch-icon" href="assets/apple-touch-icon.png" />
+    <style>
+      @font-face {
+        font-family: "DrawvidHand";
+        src: url("assets/fonts/DrawvidHandwriting.woff2") format("woff2");
+        font-display: swap;
+      }
+      html,
+      body {
+        font-family: "DrawvidHand", "Comic Sans MS", cursive, sans-serif;
+        margin: 0;
+        padding: 0;
+        overflow: hidden;
+      }
+      body {
+        /* Pinned to the visible screen edges, as in index.html. */
+        position: fixed;
+        inset: 0;
+        background: #4d78bd;
+        color: #fff;
+        text-shadow: 0 2px 0 #000, 0 0 6px rgba(0, 0, 0, 0.8);
+        -webkit-user-select: none;
+        user-select: none;
+        -webkit-touch-callout: none;
+        -webkit-tap-highlight-color: transparent;
+      }
+      #renderCanvas {
+        display: block;
+        width: 100%;
+        height: 100%;
+        touch-action: none;
+        outline: none;
+      }
+      #hud,
+      #menu {
+        position: absolute;
+        top: 12px;
+        font-size: clamp(18px, 5vw, 26px);
+      }
+      #hud {
+        left: 14px;
+        pointer-events: none;
+      }
+      #menu {
+        right: 14px;
+        color: #fff;
+        text-decoration: none;
+      }
+      /* The wind: an arrow the way it blows and how hard, as in Paper Toss. */
+      #wind {
+        position: absolute;
+        top: 56px;
+        left: 0;
+        right: 0;
+        text-align: center;
+        font-size: clamp(26px, 8vw, 40px);
+        pointer-events: none;
+      }
+      #wind span {
+        display: inline-block;
+      }
+      /* How far the basket is; one choice, as the title screen's radios. */
+      #dist {
+        position: absolute;
+        left: 50%;
+        bottom: 16px;
+        transform: translateX(-50%);
+        width: min(360px, calc(100vw - 32px));
+        display: flex;
+        gap: 4px;
+        padding: 4px;
+        border-radius: 12px;
+        background: rgba(0, 0, 0, 0.4);
+      }
+      #dist button {
+        flex: 1;
+        font: inherit;
+        font-size: clamp(17px, 4.6vw, 21px);
+        color: rgba(255, 255, 255, 0.75);
+        background: none;
+        border: 0;
+        border-radius: 8px;
+        padding: 6px 0 4px;
+        cursor: pointer;
+      }
+      #dist button[aria-checked="true"] {
+        color: #2a1208;
+        background: #fff;
+        text-shadow: none;
+      }
+    </style>
+  </head>
+  <body>
+    <canvas id="renderCanvas"></canvas>
+    <div id="hud"></div>
+    <a id="menu" href="./">Menu</a>
+    <div id="wind"></div>
+    <div id="dist" role="radiogroup" aria-label="Distance"></div>
+
+    <script src="node_modules/babylonjs/babylon.js"></script>
+    <script src="node_modules/babylonjs-loaders/babylonjs.loaders.min.js"></script>
+    <script src="toss.js"></script>
+  </body>
+</html>

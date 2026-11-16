@@ -235,6 +235,17 @@
         color: #2a1208;
         background: #fff;
       }
+      /* The other games, each its own page. */
+      #title .more {
+        display: flex;
+        justify-content: center;
+        gap: 20px;
+      }
+      #title .more a {
+        color: #fff;
+        font-size: clamp(18px, 5vw, 22px);
+        text-shadow: 0 2px 0 #000, 0 0 6px rgba(0, 0, 0, 0.8);
+      }
       /* Touch controls — touch devices only: three equal buttons across the
          bottom (◀ ▶ and the action apple). A touch anywhere else on the game
          view is also the action button (see InputManager). */
@@ -348,6 +359,7 @@
       </div>
       <div class="radio" id="tiers" role="radiogroup" aria-label="Bots"></div>
       <div class="radio" id="controls" role="radiogroup" aria-label="Controls"></div>
+      <div class="more"><a href="toss.html">Apple Toss</a></div>
     </div>
     <div id="touch">
       <!-- Filled with your apple's leaves and stem once they're rendered (royale.js). -->
