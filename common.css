@@ -35,17 +35,24 @@ body {
   outline: none;
 }
 
-/* Menu, at the top left: back to the title. */
+/* Menu, at the top left: back to the title. The size of the title's Local
+   and Online buttons (index.html #title .play): half the title's width, and
+   as tall as theirs with its second, small line. */
 .menu-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: calc((min(420px, 100vw - 32px) - 12px) / 2);
+  height: calc(1.47em + 20px);
   font: inherit;
-  font-size: clamp(17px, 4.6vw, 21px);
+  font-size: clamp(26px, 7vw, 34px);
   color: #fff;
   text-decoration: none;
   background: #d8262b;
   border: 3px solid #2a1208;
-  border-radius: 12px;
-  padding: 4px 14px 2px;
-  box-shadow: 0 4px 0 #2a1208;
+  border-radius: 14px;
+  padding: 0;
+  box-shadow: 0 5px 0 #2a1208;
   text-shadow: 0 2px 0 rgba(0, 0, 0, 0.35);
   cursor: pointer;
 }
@@ -53,7 +60,7 @@ body {
   display: none;
 }
 .menu-button:active {
-  transform: translateY(3px);
+  transform: translateY(4px);
   box-shadow: 0 1px 0 #2a1208;
 }
 

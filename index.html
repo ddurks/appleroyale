@@ -19,6 +19,12 @@
         align-items: center;
         gap: 12px;
       }
+      /* On a phone the status line sits low beside Menu, under the name box. */
+      @media (max-width: 600px) {
+        #topleft {
+          align-items: flex-end;
+        }
+      }
       #hud {
         color: #fff;
         /* Scales down on narrow phones so it never reaches the name box. */

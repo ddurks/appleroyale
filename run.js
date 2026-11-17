@@ -27,9 +27,10 @@
   const BOUGH_Y = 1.25; // a bough's underside above the branch
   const BOUGH_HALF = 0.6; // half its thickness along the branch
 
-  const TURN_EARLY = 1.2; // seconds before a corner from when a swipe left or right counts
+  const TURN_EARLY = 0.8; // seconds before a corner from when a swipe left or right counts
   const TURN_LATE = 0.15; // seconds past it that one still makes the turn (no further than the bend)
   const SWIPE_PX = 28;
+  const BARK_TILE = 6; // how much branch one copy of the bark picture covers, each way
   const BEND_R = 2.6; // the radius of the branch's bend at a corner (more than its own, so the inside doesn't pinch)
 
   const DROP_G = 2 * GRAVITY; // each new apple drops onto the branch (common.js DropIn)
@@ -43,6 +44,7 @@
   const CANOPY_MID = 17.5; // the middle of its canopy, above its foot
   const FADE_NEAR = 120; // where things start to fade into the tree's insides…
   const FADE_FAR = 380; // …and are gone, so far off a branch is only a few pixels across
+  const LEAF_DEEP = "0.55"; // how dark the backdrop's leaves are (GLSL: a float), as Royale's tree's deep inside
   const AHEAD = FADE_FAR + 40; // how far ahead the branch is kept built, past where it's faded out
 
   const dirOf = (h) => new V3(Math.round(Math.sin((h * Math.PI) / 2)), 0, Math.round(Math.cos((h * Math.PI) / 2)));
@@ -69,6 +71,11 @@
   }
   vec3 surround(vec3 d) {
     vec3 tree = textureCube(sky, vec3(d.x, -d.y, d.z)).rgb; // the probe's cube comes out upside down
+    // The leaves (and apples) deep in the canopy, darker, as in Royale's
+    // tree: all but the sky and clouds between them (as blue as they are
+    // anything else).
+    float open = smoothstep(0.0, 0.08, tree.b - max(tree.r, tree.g) + 0.08);
+    tree *= mix(${LEAF_DEEP}, 1.0, open);
     return mix(tree, DEPTHS, depths(d));
   }
   // Colour c of something at world, seen from eye: faded into the backdrop
@@ -195,7 +202,7 @@
     for (let i = 0; i < path.length; i++) {
       const frame = frames[i];
       const r = radius(lens[i] / total);
-      const around = Math.max(1, Math.round((2 * Math.PI * r) / 4)); // the bark texture: 4 units across
+      const around = Math.max(1, Math.round((2 * Math.PI * r) / BARK_TILE)); // copies of the bark round it
       for (let k = 0; k <= SIDES; k++) {
         const a = (2 * Math.PI * k) / SIDES;
         const dir = frame.side.scale(Math.cos(a)).add(frame.up.scale(Math.sin(a)));
@@ -204,7 +211,7 @@
         const p = path[i].add(dir.scale(r * (1 + bump)));
         positions.push(p.x, p.y, p.z);
         normals.push(dir.x, dir.y, dir.z);
-        uvs.push((around * k) / SIDES, lens[i] / 4);
+        uvs.push((around * k) / SIDES, lens[i] / BARK_TILE);
         if (i > 0 && k < SIDES) {
           const c = i * (SIDES + 1) + k;
           const b = c - (SIDES + 1);
