@@ -11,6 +11,8 @@
   const GRAVITY = 30;
   const TREE_SCALE = 0.8; // the trees and the stump, against how they were modelled
   const TREE_CLEAR = 4; // the nearer trees' leaves keep this far from the middle (the throw's way)
+  const TRUNK_R = 0.35; // what the apple hits of the trunk, in shares of the bark's half-width (its roots spread wider)
+  const CANOPY_IN = 0.85; // …and of the canopy, in shares of the leaves' reach (the outermost are only tips)
   const STUMP_TOP = 1.5 * TREE_SCALE; // the apple waits on a stump
 
   // The bucket (z) and the stump the apple waits on (stumpZ, the camera
@@ -481,6 +483,28 @@
       });
     }
 
+    // What the apple can hit of each tree, as it now stands: its trunk, a
+    // post up into the canopy, and the canopy, a ball the leaves' shape.
+    _treeShapes() {
+      const box = (m) => {
+        m.computeWorldMatrix(true);
+        return m.getBoundingInfo().boundingBox;
+      };
+      this.treeShapes = this.trees.map((tree) => {
+        tree.computeWorldMatrix(true);
+        const bark = box(tree.getChildMeshes(false).find((m) => m.material && /bark/.test(m.material.name)));
+        const leaves = box(tree.leaves);
+        return {
+          x: tree.position.x,
+          z: tree.position.z,
+          trunkR: TRUNK_R * bark.extendSizeWorld.x,
+          trunkTop: bark.maximumWorld.y,
+          c: leaves.centerWorld.clone(),
+          r: leaves.extendSizeWorld.scale(CANOPY_IN),
+        };
+      });
+    }
+
     // The leaves round a tree's back, behind its dark canopy from where the
     // camera stands, aren't drawn (each tree's own, as it now stands): about
     // half of them.
@@ -546,6 +570,7 @@
       this.trees[1].position.set(edge, 0, outer);
       this.trees[2].position.set(-7, 0, inner);
       this.trees[3].position.set(7, 0, inner);
+      this._treeShapes();
       this._trimLeaves();
     }
 
@@ -638,6 +663,7 @@
       this.holder.scaling.setAll(1);
       this.holder.setEnabled(this.state !== "intro"); // the logo's apple, until it lands
       this.face.set("o");
+      if (this.state === "drop") this._drop(0); // up where it falls from, not drawn a frame on the stump
       this._hud();
     }
 
@@ -808,7 +834,7 @@
       if (wl > 1e-6) this.quat = BABYLON.Quaternion.RotationAxis(w.scale(1 / wl), wl * h).multiply(this.quat).normalize();
       // Nothing to touch while the whole apple is clear of the ground and the bucket.
       const R = this.hullR;
-      if (p.y > R && (Math.hypot(p.x - b.x, p.z - b.z) > BUCKET_RT + HOOP_T + R || p.y > BUCKET_H + 0.05 + R)) return;
+      if (p.y > R && (Math.hypot(p.x - b.x, p.z - b.z) > BUCKET_RT + HOOP_T + R || p.y > BUCKET_H + 0.05 + R) && !this._nearTree(p, R)) return;
       const rot = new BABYLON.Matrix();
       this.quat.toRotationMatrix(rot);
       const offsets = this.hull.map((pt) => V3.TransformNormal(pt.p, rot));
@@ -836,10 +862,11 @@
       }
     }
 
-    // The deepest that a ball of radius s at q sinks into the ground or the
-    // bucket, and the way out.
+    // The deepest that a ball of radius s at q sinks into the ground, a tree
+    // or the bucket, and the way out.
     _contact(q, s) {
       let best = q.y < s ? { depth: s - q.y, n: new V3(0, 1, 0), ground: true } : null;
+      best = this._treeContact(q, s, best);
       const b = this.bucket.position;
       const lx = q.x - b.x;
       const lz = q.z - b.z;
@@ -850,6 +877,36 @@
         if (!c || (best && c.depth <= best.depth)) continue;
         const n = r > 1e-6 ? new V3((c.nr * lx) / r, c.ny, (c.nr * lz) / r) : new V3(0, Math.sign(c.ny) || 1, 0);
         best = { depth: c.depth, n, rim: q.y > BUCKET_H - 0.4 };
+      }
+      return best;
+    }
+
+    // Whether a ball of radius R at p is near enough a tree to touch it.
+    _nearTree(p, R) {
+      return this.treeShapes.some(
+        (t) => Math.abs(p.x - t.c.x) < t.r.x + R && Math.abs(p.z - t.c.z) < t.r.z + R && p.y < t.c.y + t.r.y + R,
+      );
+    }
+
+    // The deepest a ball of radius s at q sinks into a tree's trunk or its
+    // canopy, if deeper than best.
+    _treeContact(q, s, best) {
+      for (const t of this.treeShapes) {
+        const dx = q.x - t.x;
+        const dz = q.z - t.z;
+        const r = Math.hypot(dx, dz);
+        if (q.y < t.trunkTop && r < t.trunkR + s) {
+          const depth = t.trunkR + s - r;
+          if (!best || depth > best.depth) best = { depth, n: r > 1e-6 ? new V3(dx / r, 0, dz / r) : new V3(1, 0, 0) };
+        }
+        // The canopy: k is 1 on its surface, along its radius this way.
+        const u = q.subtract(t.c);
+        const k = Math.hypot(u.x / t.r.x, u.y / t.r.y, u.z / t.r.z);
+        const along = u.length() / Math.max(k, 1e-6);
+        const depth = s - (k - 1) * along;
+        if (depth > 0 && (!best || depth > best.depth)) {
+          best = { depth, n: new V3(u.x / t.r.x ** 2, u.y / t.r.y ** 2, u.z / t.r.z ** 2).normalize() };
+        }
       }
       return best;
     }

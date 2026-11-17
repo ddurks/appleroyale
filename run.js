@@ -27,8 +27,8 @@
   const BOUGH_Y = 1.25; // a bough's underside above the branch
   const BOUGH_HALF = 0.6; // half its thickness along the branch
 
-  const TURN_EARLY = 0.4; // seconds before a corner that a swipe counts
-  const TURN_LATE = 1.3; // how far past the corner still makes the turn
+  const TURN_EARLY = 1.2; // seconds before a corner from when a swipe left or right counts
+  const TURN_LATE = 0.15; // seconds past it that one still makes the turn (no further than the bend)
   const SWIPE_PX = 28;
   const BEND_R = 2.6; // the radius of the branch's bend at a corner (more than its own, so the inside doesn't pinch)
 
@@ -174,7 +174,17 @@
     const seed = 6.28 * Math.random();
     // Each ring's frame carried on from the last (so it never flips and
     // pinches where the limb turns upright).
-    const tangent = (i) => path[Math.min(i + 1, path.length - 1)].subtract(path[Math.max(i - 1, 0)]).normalize();
+    const inner = (i) => path[i + 1].subtract(path[i - 1]).normalize();
+    // At an end, the way the path is really going there (the last chord
+    // turned on by as much as the path turns over it), not just the chord's
+    // way, so a bend's ends sit square against the straights they meet.
+    const tangent = (i) => {
+      if (path.length < 3) return path[path.length - 1].subtract(path[0]).normalize();
+      if (i === 0) return path[1].subtract(path[0]).normalize().scale(2).subtract(inner(1)).normalize();
+      const n = path.length - 1;
+      if (i === n) return path[n].subtract(path[n - 1]).normalize().scale(2).subtract(inner(n - 1)).normalize();
+      return inner(i);
+    };
     const frames = [];
     for (let i = 0; i < path.length; i++) {
       const t = tangent(i);
@@ -505,8 +515,7 @@
         this.duck = DUCK_TIME;
         if (this.y > 0) this.vy = Math.min(this.vy, -18); // straight back down
       } else {
-        this.turnWant = dir === "right" ? 1 : -1;
-        this.turnWantT = TURN_EARLY;
+        if (this.s > this.segs[0].len - this.speed * TURN_EARLY) this.turnWant = dir === "right" ? 1 : -1;
       }
     }
 
@@ -531,7 +540,6 @@
       this.vy = 0;
       this.duck = 0;
       this.turnWant = 0;
-      this.turnWantT = 0;
       this.yaw = 0; // the heading drawn, easing to the straight's
       this.yawTo = 0;
       this.slip = new V3(0, 0, 0); // drawn offset after a corner, easing to none
@@ -638,6 +646,7 @@
         const x = Math.random() < 0.5 ? -1 : 1;
         const Y = BOUGH_Y;
         const pts = [
+          [0.4 * R, -1.1], // rooted inside the branch, so it grows out of it
           [R + 0.2, -0.9], [R + 0.5, 0.3], [R + 0.3, Y + 0.3], [0.6 * R, Y + 0.45],
           [0, Y + 0.42], [-0.6 * R, Y + 0.4], [-R - 0.6, Y + 0.15], [-R - 1.7, Y - 0.3],
         ].map(([px, py]) => at(o.s, py, x * px));
@@ -819,16 +828,15 @@
         if (this.y === 0) this.vy = 0;
       }
       this.duck = Math.max(0, this.duck - dt);
-      this.turnWantT -= dt;
 
-      // The corner: a swipe its way from a little before it to just past it
-      // takes it; the other way, or none, and you're off the end.
-      const early = Math.max(4, this.speed * TURN_EARLY);
-      if (this.turnWantT > 0 && this.s > seg.len - early) {
+      // The corner: the last swipe left or right from TURN_EARLY before it
+      // to just past it decides. Its way takes it; the other way, or none,
+      // and you're off the end.
+      if (this.s >= seg.len && this.turnWant) {
         if (this.turnWant !== seg.turn) return this._die("side", this.turnWant);
-        if (this.s >= seg.len) return this._turn();
+        return this._turn();
       }
-      if (this.s > seg.len + TURN_LATE) return this._die("end");
+      if (this.s > seg.len + Math.min(this.speed * TURN_LATE, BEND_R)) return this._die("end");
 
       if (this.y === 0) {
         for (const o of seg.obstacles) {
@@ -849,7 +857,7 @@
       this._dropSegLater(seg);
       this.s = 0;
       this.yawTo += (seg.turn * Math.PI) / 2;
-      this.turnWantT = 0;
+      this.turnWant = 0;
       this.slip = before.subtract(this._pos());
       this._fill();
     }
