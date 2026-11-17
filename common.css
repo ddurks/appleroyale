@@ -38,12 +38,15 @@ body {
 /* Menu, at the top left: back to the title. The size of the title's Local
    and Online buttons (index.html #title .play): half the title's width, and
    as tall as theirs with its second, small line. */
+:root {
+  --menu-h: calc(1.47 * clamp(26px, 7vw, 34px) + 20px); /* the Menu button's height */
+}
 .menu-button {
   display: flex;
   align-items: center;
   justify-content: center;
   width: calc((min(420px, 100vw - 32px) - 12px) / 2);
-  height: calc(1.47em + 20px);
+  height: var(--menu-h);
   font: inherit;
   font-size: clamp(26px, 7vw, 34px);
   color: #fff;

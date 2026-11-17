@@ -797,15 +797,19 @@ class Game {
       if (this.solo) return; // its own keys
       if (e.code === "KeyG") this._startNow();
     });
-    // The title menu: Local / Online, and one choice each of bots and controls.
+    // The title menu: Local / Online, the bots, and the solo games.
     document.getElementById("title").addEventListener("click", (e) => {
-      const el = e.target.closest("[data-tier], [data-ctl], [data-act]");
+      const el = e.target.closest("[data-tier], [data-act]");
       if (!el || this.state !== "title") return;
       const act = el.dataset.act;
       if (el.dataset.tier) this._setDifficulty(+el.dataset.tier);
-      else if (el.dataset.ctl) this._setTilt(el.dataset.ctl === "tilt");
       else if (act === "toss" || act === "run") this._playSolo(act, el);
       else this._play(act === "online");
+    });
+    // Buttons or tilt, at the top in a lobby or a round (touch screens).
+    document.getElementById("controls").addEventListener("click", (e) => {
+      const el = e.target.closest("[data-ctl]");
+      if (el) this._setTilt(el.dataset.ctl === "tilt");
     });
     // The lobby's buttons, top right: their own element (the canvas is the
     // action button).
@@ -889,15 +893,13 @@ class Game {
     this._renderTitleMenu();
   }
 
-  // The title menu's radio groups, showing the current choices. Controls
-  // only on touch screens.
+  // The radio groups, showing the current choices: the title's bots, and
+  // the controls (shown in lobbies and rounds on touch screens: index.html).
   _renderTitleMenu() {
     const radio = (attr, opts, on) =>
       opts.map(([v, label]) => `<button data-${attr}="${v}" role="radio" aria-checked="${v === on}">${label}</button>`).join("");
     document.getElementById("tiers").innerHTML = radio("tier", BOT_TIERS.map((t, i) => [String(i), t.name]), String(this.difficulty));
-    const ctl = document.getElementById("controls");
-    ctl.style.display = isTouch() ? "" : "none";
-    ctl.innerHTML = radio("ctl", [["buttons", "Buttons"], ["tilt", "Tilt"]], this.input.tilt ? "tilt" : "buttons");
+    document.getElementById("controls").innerHTML = radio("ctl", [["buttons", "Buttons"], ["tilt", "Tilt"]], this.input.tilt ? "tilt" : "buttons");
   }
 
   // ── Title ──────────────────────────────────────────────────────────

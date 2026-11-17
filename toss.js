@@ -81,6 +81,7 @@
 
   const WIND_MAX = 7; // the number shown
   const WIND_ACCEL = 1.0; // sideways acceleration per unit of wind
+  const WIND_COLORS = [[255, 255, 255], [255, 214, 10], [255, 140, 26], [255, 59, 48]]; // its arrow, none to WIND_MAX
   const MAX_SLOPE = 0.9; // the most sideways a flick counts (dx / dy)
   const FLICK_MIN_PX = 40;
   const FLICK_MAX_MS = 700;
@@ -672,8 +673,13 @@
       // Two decimals as shown, either way; never quite still.
       const w = 0.3 + (WIND_MAX - 0.3) * Math.random();
       this.wind = Math.round(w * 100) / 100 * (Math.random() < 0.5 ? -1 : 1);
+      // The arrow: white in a breath of it, through yellow and orange to red
+      // in the strongest.
+      const at = (Math.abs(this.wind) / WIND_MAX) * (WIND_COLORS.length - 1);
+      const i = Math.min(WIND_COLORS.length - 2, Math.floor(at));
+      const rgb = WIND_COLORS[i].map((c, k) => Math.round(c + (WIND_COLORS[i + 1][k] - c) * (at - i)));
       const el = document.getElementById("wind");
-      el.innerHTML = `<span style="transform: scaleX(${this.wind < 0 ? -1 : 1})">➜</span> ${Math.abs(this.wind).toFixed(2)}`;
+      el.innerHTML = `<span style="transform: scaleX(${this.wind < 0 ? -1 : 1}); color: rgb(${rgb})">➜</span> ${Math.abs(this.wind).toFixed(2)}`;
     }
 
     _hud() {

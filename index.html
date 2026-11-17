@@ -138,8 +138,7 @@
         display: none;
       }
       /* The title menu, under the 3D logo (royale.js TitleScreen): the two
-         play buttons, then two radio groups of one choice each (bots, and
-         controls on touch screens). */
+         play buttons, the bots (a radio group), then the solo games. */
       #title {
         display: none;
         position: absolute;
@@ -262,10 +261,25 @@
         right: 14px;
         font-size: clamp(18px, 5vw, 26px);
       }
-      /* The wind: an arrow the way it blows and how hard, as in Paper Toss. */
+      /* Toss, down from the top, clear of where the apple flies: the distances,
+         then Menu and the score, then the wind. */
+      body.solo-toss {
+        --toss-row: 68px; /* Menu's and the score's top, under the distances */
+      }
+      body.solo-toss #topleft {
+        top: var(--toss-row);
+      }
+      body.solo-toss #soloHud {
+        top: var(--toss-row);
+        height: var(--menu-h);
+        display: flex;
+        align-items: center;
+      }
+      /* The wind: an arrow the way it blows (coloured by how hard, toss.js)
+         and how hard, as in Paper Toss. */
       #wind {
         position: absolute;
-        top: 56px;
+        top: calc(var(--toss-row, 0px) + var(--menu-h) + 10px);
         left: 0;
         right: 0;
         text-align: center;
@@ -278,7 +292,7 @@
       #dist {
         position: absolute;
         left: 50%;
-        bottom: 16px;
+        top: 12px;
         transform: translateX(-50%);
         width: min(360px, calc(100vw - 32px));
       }
@@ -395,9 +409,27 @@
         height: 64px;
         visibility: hidden;
       }
+      /* Buttons or tilt: on touch screens, in Royale's lobbies and rounds, at
+         the top as Toss's distances are, Menu, the status and your name
+         under it. */
+      #controls {
+        display: none;
+        position: absolute;
+        left: 50%;
+        top: 12px;
+        transform: translateX(-50%);
+        width: min(260px, calc(100vw - 32px));
+      }
       @media (hover: none) and (pointer: coarse) {
         #touch {
           display: flex;
+        }
+        body:not(.titlescreen):not(.solo) #controls:not(:empty) {
+          display: flex;
+        }
+        body:not(.titlescreen):not(.solo) #topleft,
+        body:not(.titlescreen):not(.solo) #topright {
+          top: 68px;
         }
       }
     </style>
@@ -413,6 +445,7 @@
       <input id="name" maxlength="16" placeholder="Your name" autocomplete="off" spellcheck="false" aria-label="Your name" />
       <div id="bar"></div>
     </div>
+    <div class="radio" id="controls" role="radiogroup" aria-label="Controls"></div>
     <div id="banner"></div>
     <div id="title">
       <p id="titlemsg"></p>
@@ -422,7 +455,6 @@
         <button data-act="online">Online<small>vs players</small></button>
       </div>
       <div class="radio" id="tiers" role="radiogroup" aria-label="Bots"></div>
-      <div class="radio" id="controls" role="radiogroup" aria-label="Controls"></div>
       <div class="solo">
         <button data-act="toss">Apple Toss<small>solo · local only</small></button>
         <button data-act="run">Apple Run<small>solo · local only</small></button>
