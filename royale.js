@@ -52,7 +52,9 @@ const COLUMN_TOP_H = 9.7; // the dome at its top, scallops and all
 const COLUMN_DEEP = 0.34; // how dark its leaves get, deepest inside
 const COLUMN_OPEN_TIME = 1.4; // seconds for the near half to fade away as a round begins
 const GO_BANNER_TIME = 0.6; // "GO!" stays up this long after the countdown
-const ASCENT_TIME = 1.6; // seconds for the view to rise back up to the title
+const ASCENT_TIME = 2; // seconds for the view to rise back up to the title's sky
+const LOGO_IN_TIME = 0.7; // …where the logo fades in over this long, from when the view's all but there
+const SOLO_OUT = [0.35, 0.9]; // a solo game's picture fades from over the sky between these shares of the way up
 
 // Online (net.js): other apples are drawn this many steps behind the newest
 // snapshot (67 ms: two snapshot gaps), so there's always one to blend toward.
@@ -786,6 +788,7 @@ class Game {
     const d = store.get(DIFFICULTY_KEY);
     if (d !== null && BOT_TIERS[+d]) this.difficulty = +d;
     this.online = null; // online state while connected (see _goOnline)
+    this.logoIn = null; // how far the logo has faded in (_fadeLogoIn); null once it's all there
     window.addEventListener("keydown", (e) => {
       if (typing(e)) return;
       if (this.state === "title") {
@@ -797,14 +800,18 @@ class Game {
       if (this.solo) return; // its own keys
       if (e.code === "KeyG") this._startNow();
     });
-    // The title menu: Local / Online, the bots, and the solo games.
+    // The title menu: Local / Online, and the single-player games.
     document.getElementById("title").addEventListener("click", (e) => {
-      const el = e.target.closest("[data-tier], [data-act]");
+      const el = e.target.closest("[data-act]");
       if (!el || this.state !== "title") return;
       const act = el.dataset.act;
-      if (el.dataset.tier) this._setDifficulty(+el.dataset.tier);
-      else if (act === "toss" || act === "run") this._playSolo(act, el);
+      if (act === "toss" || act === "run") this._playSolo(act, el);
       else this._play(act === "online");
+    });
+    // The bots, at the top of the title.
+    document.getElementById("tiers").addEventListener("click", (e) => {
+      const el = e.target.closest("[data-tier]");
+      if (el) this._setDifficulty(+el.dataset.tier);
     });
     // Buttons or tilt, at the top in a lobby or a round (touch screens).
     document.getElementById("controls").addEventListener("click", (e) => {
@@ -912,12 +919,17 @@ class Game {
     this.state = "title";
     this.descent = null;
     document.body.classList.remove("falling");
+    const camY = this.camera.position.y;
     this._placeCrown();
     this.crown.setEnabled(true);
-    if (!this.ascent) this.clouds.scatter(); // risen to: the sky's already there
+    // Risen to: the sky's already there (brought down with the treetop, if
+    // that stood higher for the rise).
+    if (this.ascent) for (const c of this.clouds.clouds) c.mesh.position.y += this.camera.position.y - camY;
+    else this.clouds.scatter();
     this.ascent = null;
     this.clouds.show(true);
     this.logo.show(true);
+    document.body.classList.remove("arriving");
     document.body.classList.add("titlescreen");
     document.getElementById("titlemsg").textContent = message || "";
     this._renderTitleMenu();
@@ -925,14 +937,16 @@ class Game {
     this._updateHUD();
   }
 
-  // Where the logo fits: between the name box and the title's menu, in CSS
-  // pixels down from the canvas's top.
+  // Where the logo fits: between the name box (under the bots, at the top)
+  // and the title's menu, in CSS pixels down from the canvas's top.
   _logoBand() {
     const box = this.engine.getRenderingCanvas().getBoundingClientRect();
-    return { top: 64, bottom: document.getElementById("title").getBoundingClientRect().top - box.top - 16 };
+    return { top: 108, bottom: document.getElementById("title").getBoundingClientRect().top - box.top - 16 };
   }
 
   _hideTitle() {
+    this.logoIn = null;
+    this.logo.fade(1);
     this.logo.show(false);
     document.body.classList.remove("titlescreen");
   }
@@ -944,12 +958,13 @@ class Game {
     this.crown.setEnabled(false);
   }
 
-  // The crown CROWN_SCREENS screens above the top of the lobby's view, and
-  // the title's camera just clear of it, all sky.
-  _placeCrown() {
+  // The crown CROWN_SCREENS screens above the top of the lobby's view (or of
+  // a view at height `from`: a round's, to rise from), and the title's
+  // camera just clear of it, all sky.
+  _placeCrown(from = LOBBY_CAM_Y) {
     const cam = this.camera;
     const viewH = cam.orthoTop - cam.orthoBottom;
-    this.crown.position.y = LOBBY_CAM_Y + cam.orthoTop + CROWN_SCREENS * viewH;
+    this.crown.position.y = from + cam.orthoTop + CROWN_SCREENS * viewH;
     cam.position.set(0, this.crown.position.y - cam.orthoBottom + 1, -18);
     this._updateBgScroll();
   }
@@ -998,26 +1013,38 @@ class Game {
     return camY;
   }
 
-  // Back to the title, the fall in reverse: the view rises up the tree to
-  // the treetop's sky, where the logo waits. The round stays as it was.
-  _beginAscent(message) {
+  // Back to the title, the fall in reverse: the view rises up the tree,
+  // past its top, to the sky, where the logo fades in and then the menu.
+  // The round stays as it was. From a solo game (`solo`) the sky's already
+  // all round: its own camera swings up to it (the way in, backwards) as its
+  // picture fades from over the title's.
+  _beginAscent(message, solo) {
     const cam = this.camera;
-    const from = { x: cam.position.x - this.shakeOff.x, y: cam.position.y - this.shakeOff.y };
+    let from = { x: cam.position.x - this.shakeOff.x, y: cam.position.y - this.shakeOff.y };
     this.shakeOff.x = this.shakeOff.y = 0;
-    this._placeCrown(); // the title's view, to lay the logo out in
-    this.logo.show(true);
-    this.logo.update(0);
+    // The treetop two screens above wherever the view is, the title above it.
+    this._placeCrown(solo ? undefined : Math.max(LOBBY_CAM_Y, from.y));
+    this.crown.setEnabled(true);
+    this.clouds.scatter();
+    this.clouds.show(true);
     const to = cam.position.y;
+    if (solo) from = { x: 0, y: to };
     cam.position.x = from.x;
     cam.position.y = from.y;
+    this._updateBgScroll();
+    // The menu laid out, unseen, for the logo to fit over (_logoBand).
+    document.getElementById("titlemsg").textContent = message || "";
+    document.body.classList.add("arriving");
+    this.logo.show(true);
+    this.logo.fade(0);
+    this.logoIn = 0;
     this.descent = null;
     document.body.classList.remove("falling");
     const you = this.views[this.humanIdx];
     if (you) you.mesh.setEnabled(true);
-    this.ascent = { t: 0, from, to, message };
+    this.ascent = { t: 0, from, to, message, solo };
     this.state = "ascent";
-    this.clouds.scatter();
-    this.clouds.show(true);
+    if (solo) this.fader.from(solo.scene, solo.camera);
     this._clearLabels();
     this.setBanner("");
     this._updateHUD();
@@ -1027,11 +1054,28 @@ class Game {
     const a = this.ascent;
     a.t += dt;
     this.clouds.update(dt);
-    const e = fallEase(a.t / ASCENT_TIME);
+    const f = Math.min(1, a.t / ASCENT_TIME);
+    const e = fallEase(f);
     this.camera.position.x = a.from.x * (1 - e);
     this.camera.position.y = a.from.y + (a.to - a.from.y) * e;
     this._updateBgScroll();
+    if (a.solo) {
+      a.solo.out(dt, f);
+      const [f0, f1] = SOLO_OUT;
+      const gone = Math.min(1, Math.max(0, (f - f0) / (f1 - f0)));
+      this.fader.again(1 - gone * gone * (3 - 2 * gone));
+    }
+    this.logo.update(dt);
+    if (e > 0.97) this._fadeLogoIn(dt);
     if (a.t >= ASCENT_TIME) this._showTitle(a.message);
+  }
+
+  // The logo, fading in at the end of the way back up (and on, in the title).
+  _fadeLogoIn(dt) {
+    if (this.logoIn === null) return;
+    this.logoIn = Math.min(1, this.logoIn + dt / LOGO_IN_TIME);
+    this.logo.fade(this.logoIn);
+    if (this.logoIn === 1) this.logoIn = null;
   }
 
   // Local or Online, from the title: into that lobby.
@@ -1076,14 +1120,13 @@ class Game {
     this._updateBar();
   }
 
-  // Out of a solo game, back to the title, the game fading away.
+  // Out of a solo game, back up to the title (_beginAscent).
   _leaveSolo() {
     const solo = this.solo;
-    this.fader.from(solo.scene, solo.camera);
     solo.leave();
     this.solo = null;
     document.body.classList.remove("solo", "solo-toss", "solo-run");
-    this._showTitle();
+    this._beginAscent(undefined, solo);
   }
 
   // Back to the title (from a lobby, the end of an offline round, or a solo game).
@@ -1334,6 +1377,7 @@ class Game {
       this._placeCrown(); // the view's size may have changed
       this.clouds.update(dt);
       this.logo.update(dt);
+      this._fadeLogoIn(dt);
       return;
     }
     if (this.state === "ascent") {

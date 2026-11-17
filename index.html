@@ -68,6 +68,7 @@
       /* Top right: your name (editable any time), then the lobby buttons. */
       #topright {
         position: absolute;
+        transition: top 0.3s;
         top: 12px;
         right: 12px;
         display: flex;
@@ -137,8 +138,10 @@
         user-select: none;
         display: none;
       }
-      /* The title menu, under the 3D logo (royale.js TitleScreen): the two
-         play buttons, the bots (a radio group), then the solo games. */
+      /* The title menu, under the 3D logo (royale.js TitleScreen): two
+         sections, each a caption over a pair of buttons. Multiplayer is Apple
+         Royale, Local or Online (red); Single player is Apple Toss and Apple
+         Run (leaf green). */
       #title {
         display: none;
         position: absolute;
@@ -153,6 +156,19 @@
       }
       body.titlescreen #title {
         display: flex;
+        animation: titleIn 0.7s ease-out both;
+      }
+      /* On the way back up to the title the menu's there to measure, unseen;
+         it fades up into place as the title arrives. */
+      body.arriving #title {
+        display: flex;
+        visibility: hidden;
+      }
+      @keyframes titleIn {
+        from {
+          opacity: 0;
+          transform: translateX(-50%) translateY(14px);
+        }
       }
       body.titlescreen #touch,
       body.falling #names {
@@ -189,8 +205,7 @@
         transform: translateY(4px);
         box-shadow: 0 1px 0 #2a1208;
       }
-      #title .play small,
-      #title .solo small {
+      #title .play small {
         display: block;
         font-size: 0.5em;
         opacity: 0.85;
@@ -202,30 +217,39 @@
         font-size: clamp(16px, 4.4vw, 19px);
         text-shadow: 0 2px 0 #000, 0 0 6px rgba(0, 0, 0, 0.8);
       }
-      /* The solo games, each its own page: plainer buttons than Royale's. */
-      #title .solo {
-        display: flex;
-        gap: 12px;
-        margin-top: 4px;
+      #title .caption ~ .caption {
+        margin-top: 6px; /* the second section, a little apart */
       }
+      /* Single player: as Royale's buttons (one line, as tall as their two),
+         in leaf green. */
       #title .solo button {
-        flex: 1;
-        font: inherit;
-        cursor: pointer;
-        font-size: clamp(19px, 5.2vw, 24px);
-        color: #2a1208;
-        background: #fff;
-        border: 3px solid #2a1208;
-        border-radius: 14px;
-        padding: 6px 0 4px;
-        box-shadow: 0 4px 0 #2a1208;
+        height: var(--menu-h);
+        padding: 0;
+        background: #4e8a37;
+        border-color: #16300f;
+        box-shadow: 0 5px 0 #16300f;
       }
       #title .solo button:active {
-        transform: translateY(3px);
-        box-shadow: 0 1px 0 #2a1208;
+        box-shadow: 0 1px 0 #16300f;
       }
       #title .solo button.busy {
         opacity: 0.6; /* loading, the first time */
+      }
+      /* The bots, on the title: at the top, your name under them. */
+      #tiers {
+        display: none;
+        position: absolute;
+        left: 50%;
+        top: 12px;
+        transform: translateX(-50%);
+        width: min(360px, calc(100vw - 32px));
+      }
+      body.titlescreen #tiers {
+        display: flex;
+        animation: titleIn 0.7s ease-out both;
+      }
+      body.titlescreen #topright {
+        top: 68px;
       }
       /* The solo games (toss.js, run.js), played on this page: their score
          top right, Toss's wind and distance, Run's message; Royale's own
@@ -445,19 +469,20 @@
       <input id="name" maxlength="16" placeholder="Your name" autocomplete="off" spellcheck="false" aria-label="Your name" />
       <div id="bar"></div>
     </div>
+    <div class="radio" id="tiers" role="radiogroup" aria-label="Bots"></div>
     <div class="radio" id="controls" role="radiogroup" aria-label="Controls"></div>
     <div id="banner"></div>
     <div id="title">
       <p id="titlemsg"></p>
-      <p class="caption">Royale · last apple standing</p>
+      <p class="caption">Multiplayer · Apple Royale</p>
       <div class="play">
         <button data-act="local">Local<small>vs bots</small></button>
         <button data-act="online">Online<small>vs players</small></button>
       </div>
-      <div class="radio" id="tiers" role="radiogroup" aria-label="Bots"></div>
-      <div class="solo">
-        <button data-act="toss">Apple Toss<small>solo · local only</small></button>
-        <button data-act="run">Apple Run<small>solo · local only</small></button>
+      <p class="caption">Single player</p>
+      <div class="play solo">
+        <button data-act="toss">Apple Toss</button>
+        <button data-act="run">Apple Run</button>
       </div>
     </div>
     <div id="soloHud"></div>

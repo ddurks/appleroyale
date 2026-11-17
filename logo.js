@@ -73,6 +73,11 @@ class Logo {
     else this.idle.stop();
   }
 
+  // How much of it shows, 0 (none) to 1: fading in, back at the title.
+  fade(a) {
+    for (const m of this.root.getChildMeshes(false)) m.visibility = a;
+  }
+
   update(dt) {
     this._layout();
     // Where the apple is in its idle: 0 standing tall, ½ crouched lowest.

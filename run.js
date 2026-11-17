@@ -401,6 +401,15 @@
       this._msg("");
     }
 
+    // A frame while leaving (not drawn here: royale.js takes its picture):
+    // the game stopped where it was, the camera swung up into the tree, f
+    // (0 to 1) of the way, the intro's aim backwards.
+    out(dt, f) {
+      this.outF = f;
+      this._draw(dt);
+      this.outF = 0;
+    }
+
     // A frame: the game, then what's drawn over it (`over`), then the logo.
     frame(dt, over) {
       this._update(dt);
@@ -790,7 +799,6 @@
 
     _update(dt) {
       if (!this.segs) return;
-      if (this.state === "intro") this._intro(dt);
       if (this.state === "drop") this._drop(dt);
       else if (this.state === "run") this._roll(dt);
       else if (this.state === "dead") this._tumble(dt);
@@ -812,10 +820,9 @@
     }
 
     // The opening (logo.js Intro): the camera tipped up to the leaves above,
-    // coming down as the logo's apple falls onto the branch; there, ours takes
-    // over with the landing (the camera's aimed in _draw).
-    _intro(dt) {
-      if (this.intro.running) return;
+    // coming down as the logo's apple falls onto the branch (_draw, which
+    // aims the camera); there, ours takes over with the landing.
+    _landed() {
       this._startDrop(0);
       this.body.setEnabled(true);
       this._msg(HOW_TO);
@@ -995,7 +1002,14 @@
       if (this.state === "intro") {
         this.intro.update(dt, ground, this.appleH);
         this.intro.aim(this.camera);
+        // Landed: ours is there from this same frame, squashed.
+        if (!this.intro.running) {
+          this._landed();
+          this._drop(0);
+          return this._draw(0);
+        }
       }
+      if (this.outF) this.camera.rotation.x -= INTRO_PITCH * fallEase(this.outF);
       for (const m of this.envMats) m.setVector3("eye", this.camera.position);
     }
   }

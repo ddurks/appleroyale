@@ -404,6 +404,17 @@
       this.active = false;
     }
 
+    // A frame while leaving (not drawn here: royale.js takes its picture):
+    // the camera swung up to the sky, f (0 to 1) of the way, the intro's aim
+    // backwards.
+    out(dt, f) {
+      this._update(dt);
+      const cam = this.camera;
+      cam.position.copyFrom(this.camBase.position);
+      cam.rotation.copyFrom(this.camBase.rotation);
+      cam.rotation.x -= INTRO_PITCH * fallEase(f);
+    }
+
     // A frame: the game, then what's drawn over it (`over`), then the logo.
     frame(dt, over) {
       this._update(dt);
@@ -735,6 +746,7 @@
       this.drop.start(0);
       this.face.set(null);
       this.holder.setEnabled(true);
+      this._drop(0); // squashed from its first frame, not drawn one standing
     }
 
     _bindInput() {

@@ -282,6 +282,12 @@ class Fader extends Overlay {
     this.alpha = 1;
   }
 
+  // The same picture taken again (its scene has moved on), shown this much.
+  again(alpha) {
+    this.rtt.render();
+    this.alpha = alpha;
+  }
+
   update(dt) {
     this.alpha = Math.max(0, this.alpha - dt / FADE_TIME);
   }
