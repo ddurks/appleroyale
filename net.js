@@ -3,7 +3,9 @@
 //   → auth, join, q (queue for a lobby), go (start now), i (one step's input),
 //     n (rename)
 //   ← welcome, hi (the server's rules fingerprint), s (snapshot, 30/s)
-// See MULTIPLAYER_PLAN.md and the server's games/appleroyale/protocol.ts.
+// Snapshots come as binary, in drawvidverse's shared format (wire.js, copied
+// from there by its tools/scripts/copy-wire.sh); the welcome brings their
+// schema. See the server's games/appleroyale/protocol.ts.
 
 (function () {
   "use strict";
@@ -34,6 +36,7 @@
       this.h = handlers;
       this.closed = false;
       this.ws = new WebSocket(serverUrl());
+      this.ws.binaryType = "arraybuffer";
       this.ws.onopen = () => {
         this._send({ t: "auth", token: "" });
         this._send({ t: "join", name });
@@ -50,11 +53,19 @@
     _receive(e) {
       let m;
       try {
-        m = JSON.parse(e.data);
+        if (typeof e.data === "string") m = JSON.parse(e.data);
+        else if (this.codec) m = this.codec.decode(new Uint8Array(e.data));
+        else return;
       } catch (err) {
         return;
       }
-      if (m.t === "welcome") this._send({ t: "q" });
+      if (m.t === "welcome") {
+        if (m.wire) {
+          if (m.wire.v !== DrawvidWire.VERSION) return this.close("This page is out of date — reload it to play online.");
+          this.codec = DrawvidWire.compile(m.wire.schema);
+        }
+        this._send({ t: "q" });
+      }
       else if (m.t === "hi") this.h.onHello(m.rules);
       else if (m.t === "s") this.h.onSnapshot(m);
       else if (m.t === "error") this.close(m.message || m.code || "server error");

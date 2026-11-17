@@ -58,7 +58,7 @@ const GO_BANNER_TIME = 0.6; // "GO!" stays up this long after the countdown
 const INTERP_STEPS = 4;
 // The server's message format (its engine.ts PROTOCOL): checked along with
 // the rules, so a page that speaks an older one is told to reload.
-const NET_PROTOCOL = 2;
+const NET_PROTOCOL = 3;
 // A snapshot's `me` (our apple in full) lists these, in the server's order.
 const ME_FIELDS = [
   "alive", "x", "y", "vx", "vy", "grounded", "coyote", "jumpBuffer", "jumpWindup",

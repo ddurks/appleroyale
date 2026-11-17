@@ -185,6 +185,10 @@ title.
 - `net.js` speaks the protocol; `royale.js` mirrors the server's round in a
   core `Round`, predicts your apple with the core and draws the others
   67 ms behind, blended between snapshots (30 a second).
+- Snapshots come as binary, in drawvidverse's shared format: `wire.js` is
+  its codec, copied from `../drawvidverse` by its
+  `tools/scripts/copy-wire.sh ../appleroyale` (don't edit it here); the
+  server sends the snapshot's schema in its welcome.
 - After changing `core.js` (or the bot), run
   `../drawvidverse/tools/scripts/sync-appleroyale.sh` so the server plays
   by the same rules; its tests fail until you do. A page whose rules differ

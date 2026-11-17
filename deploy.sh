@@ -36,7 +36,7 @@ done
 
 # The page and its scripts: no-cache, so a release shows up on the next load.
 echo "==> Uploading page + scripts (no-cache)"
-for f in index.html common.css royale.js core.js net.js bots.js sliceBurst.js grass.js common.js logo.js toss.html toss.js run.html run.js; do
+for f in index.html common.css royale.js core.js wire.js net.js bots.js sliceBurst.js grass.js common.js logo.js toss.html toss.js run.html run.js; do
   aws s3 cp "$f" "s3://${BUCKET}/$f" --only-show-errors --cache-control "no-cache"
 done
 
