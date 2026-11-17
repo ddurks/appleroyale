@@ -23,6 +23,11 @@
   const LAG = +new URLSearchParams(location.search).get("lag") || 0;
   const later = (fn) => (LAG ? setTimeout(fn, LAG) : fn());
 
+  // Snapshots come 30 a second; none for this long and the link has
+  // stalled. Inputs aren't sent into it meanwhile: they'd only pile up and
+  // arrive in one late burst (the server keeps just the newest few).
+  const STALL_MS = 500;
+
   class Net {
     // handlers: onHello(rules), onSnapshot(s), onClose(reason)
     constructor(name, handlers) {
@@ -33,7 +38,11 @@
         this._send({ t: "auth", token: "" });
         this._send({ t: "join", name });
       };
-      this.ws.onmessage = (e) => later(() => this._receive(e));
+      this.heardAt = performance.now();
+      this.ws.onmessage = (e) => {
+        this.heardAt = performance.now();
+        later(() => this._receive(e));
+      };
       this.ws.onclose = () => this.close("connection lost");
       this.ws.onerror = () => this.close("can't reach the server");
     }
@@ -52,6 +61,7 @@
     }
 
     input(seq, input) {
+      if (performance.now() - this.heardAt > STALL_MS) return;
       this._send({ t: "i", s: seq, m: input.move, b: input.button });
     }
 
