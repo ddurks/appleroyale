@@ -12,14 +12,16 @@
   const TREE_SCALE = 0.8; // the trees and the stump, against how they were modelled
   const TREE_CLEAR = 4; // the nearer trees' leaves keep this far from the middle (the throw's way)
   const STUMP_TOP = 1.5 * TREE_SCALE; // the apple waits on a stump
-  const START = new V3(0, STUMP_TOP + APPLE_R, 0);
 
-  // The bucket: how far away, and how long the throw takes to get there.
+  // The bucket (z) and the stump the apple waits on (stumpZ, the camera
+  // behind it), and how long the throw takes to get from one to the other.
   const DISTS = [
-    { name: "Near", z: 20, time: 1.25 },
-    { name: "Mid", z: 28, time: 1.45 },
-    { name: "Far", z: 37, time: 1.65 },
+    { name: "Near", z: 20, stumpZ: -28, time: 1.6 },
+    { name: "Mid", z: 28, stumpZ: -44, time: 1.9 },
+    { name: "Far", z: 37, stumpZ: -113, time: 2.4 },
   ];
+  const CAM_BACK = 11; // the camera, behind the stump
+  const CAM_Y = 5.6;
 
   // The bucket: wooden staves bound with iron hoops, wider at the top. Its
   // outlines (radius, height) swept round make both what you see and what the
@@ -75,7 +77,7 @@
 
   const DROP_G = 2 * GRAVITY; // each new apple drops onto the stump (common.js DropIn)
 
-  const WIND_MAX = 5; // the number shown
+  const WIND_MAX = 7; // the number shown
   const WIND_ACCEL = 1.0; // sideways acceleration per unit of wind
   const MAX_SLOPE = 0.9; // the most sideways a flick counts (dx / dy)
   const FLICK_MIN_PX = 40;
@@ -89,18 +91,18 @@
   // pieces to a blade.
 
   const GRASS_BLADES = 60000;
-  const GRASS_FAR = 140; // how far from the camera the field reaches
+  const GRASS_PAST = 100; // how far past the bucket the field reaches
   const GRASS_BANDS = [[10, 4], [35, 2], [Infinity, 1]]; // out to how far, pieces to a blade
 
-  function sowField(camPos) {
+  function sowField(camPos, stumpZ, far) {
     const bands = GRASS_BANDS.map(() => new Float32Array(16 * GRASS_BLADES));
     const counts = GRASS_BANDS.map(() => 0);
     for (let i = 0; i < GRASS_BLADES; i++) {
-      const away = 1.5 * Math.pow(GRASS_FAR / 1.5, Math.random());
+      const away = 1.5 * Math.pow(far / 1.5, Math.random());
       const x = camPos.x + (2 * Math.random() - 1) * (2 + 0.8 * away);
       const z = camPos.z + away;
       const wide = 0.14 + 0.1 * Math.random() + 0.003 * away; // far blades a little wider, to fill in
-      const tall = (0.6 + 0.6 * Math.random()) * (x * x + z * z < 10 ? 0.4 : 1); // short where the stump stands
+      const tall = (0.6 + 0.6 * Math.random()) * (x * x + (z - stumpZ) ** 2 < 10 ? 0.4 : 1); // short where the stump stands
       const b = GRASS_BANDS.findIndex(([out]) => away < out);
       Grass.blade(bands[b], counts[b]++, x, 0, z, wide, tall);
     }
@@ -327,7 +329,8 @@
       this.state = "intro"; // intro → drop → ready → fly → in | out → drop
       this.drop = new DropIn(DROP_G);
       this.t = 0;
-      this.pos = START.clone();
+      this.start = new V3(0, STUMP_TOP + APPLE_R, 0); // where the apple waits (_setDist)
+      this.pos = this.start.clone();
       this.vel = new V3(0, 0, 0);
       this.spin = new V3(0, 0, 0); // angular velocity
       this.quat = BABYLON.Quaternion.Identity();
@@ -335,17 +338,13 @@
 
     async _init() {
       const scene = this.scene;
-      this.camera = new BABYLON.FreeCamera("cam", new V3(0, 5.6, -11), scene);
+      this.camera = new BABYLON.FreeCamera("cam", new V3(0, CAM_Y, 0), scene);
       this.camera.fov = 0.8;
       this.camera.minZ = 0.1;
 
-      // The soil stops just short of the farthest blades, so none shows above
-      // the last of the grass against the sky.
-      const soilFar = this.camera.position.z + 0.96 * GRASS_FAR;
-      const ground = BABYLON.MeshBuilder.CreateGround("ground", { width: 400, height: soilFar + 40 }, scene);
-      ground.position.z = (soilFar - 40) / 2;
-      ground.material = flatMaterial(scene, "soil", GRASS_SOIL);
-      const [near, ...far] = sowField(this.camera.position);
+      this.ground = BABYLON.MeshBuilder.CreateGround("ground", { width: 400, height: 1 }, scene);
+      this.ground.material = flatMaterial(scene, "soil", GRASS_SOIL);
+      const [near, ...far] = sowField(this.camera.position, 0, 1.5); // sown again for each level (_sow)
       this.grass = new Grass(scene, near.matrices);
       for (const band of far) this.grass.addLayer(band.matrices, band.levels);
       this.clouds = new Clouds(scene, { band: () => this._skyBand(), z: CLOUD_Z, widths: CLOUD_W, speeds: CLOUD_SPEED });
@@ -509,6 +508,26 @@
       }
     }
 
+    // The field, sown afresh where the camera now looks (each level's stands
+    // in its own place), as thinned as it was. The soil stops just short of
+    // the farthest blades, so none shows above the last of the grass against
+    // the sky.
+    _sow() {
+      const cam = this.camera.position;
+      const far = DISTS[this.distIdx].z + GRASS_PAST - cam.z;
+      const soilFar = cam.z + 0.96 * far;
+      const soilNear = cam.z - 10;
+      this.ground.scaling.z = soilFar - soilNear;
+      this.ground.position.z = (soilFar + soilNear) / 2;
+      const layers = sowField(cam, DISTS[this.distIdx].stumpZ, far);
+      this.grass.meshes.forEach((m, i) => {
+        const share = m.thinInstanceCount / m.allBlades;
+        m.thinInstanceSetBuffer("matrix", layers[i].matrices, 16, true);
+        m.allBlades = layers[i].matrices.length / 16;
+        m.thinInstanceCount = Math.floor(share * m.allBlades);
+      });
+    }
+
     // Two trees a little behind the bucket, either side of it, and two
     // nearer than it out at the screen's edges, half out of view (on a wide
     // screen, not so far out that they stop framing the bucket). The nearer
@@ -552,7 +571,7 @@
     // The stump the apple waits on: the foot of the same trunk, sliced off low
     // and twice the size.
     _addStump(container) {
-      const node = new BABYLON.TransformNode("stump", this.scene);
+      const node = (this.stump = new BABYLON.TransformNode("stump", this.scene));
       container.instantiateModelsToScene((n) => `stump_${n}`, false).rootNodes[0].parent = node;
       node.scaling.setAll(TREE_SCALE);
     }
@@ -578,8 +597,11 @@
       store.set("toss.dist", i);
       const d = DISTS[i];
       this.bucket.position.set(0, 0, d.z);
-      this.camera.position.set(0, 5.6, -11);
-      this.camera.setTarget(new V3(0, 1.0, d.z * 0.5));
+      this.stump.position.z = d.stumpZ;
+      this.start.z = d.stumpZ;
+      this.camera.position.set(0, CAM_Y, d.stumpZ - CAM_BACK);
+      this.camera.setTarget(new V3(0, 1.0, (d.z + d.stumpZ) * 0.5));
+      this._sow();
       this.camBase = { position: this.camera.position.clone(), rotation: this.camera.rotation.clone() };
       this._placeTrees();
       this.score = 0;
@@ -606,7 +628,7 @@
       if (this.state !== "intro") this.state = "drop";
       this.drop.start(DROP_FROM);
       this.t = 0;
-      this.pos.copyFrom(START);
+      this.pos.copyFrom(this.start);
       this.vel.set(0, 0, 0);
       this.quat = BABYLON.Quaternion.Identity();
       this.spin.set(0, 0, 0);
@@ -641,7 +663,7 @@
       const cam = this.camera;
       cam.position.copyFrom(this.camBase.position);
       cam.rotation.copyFrom(this.camBase.rotation);
-      this.intro.update(dt, new V3(0, STUMP_TOP, 0), this.appleH);
+      this.intro.update(dt, new V3(0, STUMP_TOP, DISTS[this.distIdx].stumpZ), this.appleH);
       this.intro.aim(cam);
       if (this.intro.running) return;
       cam.position.copyFrom(this.camBase.position);
@@ -699,11 +721,11 @@
       const d = DISTS[this.distIdx];
       slope = Math.max(-MAX_SLOPE, Math.min(MAX_SLOPE, slope));
       const rim = new V3(0, BUCKET_H, d.z);
-      const a = this._screen(START);
+      const a = this._screen(this.start);
       const b = this._screen(rim);
       const pxPerUnit = this._screen(new V3(1, BUCKET_H, d.z)).x - b.x;
       const aimX = (slope * (a.y - b.y)) / pxPerUnit;
-      this.vel.set(aimX / d.time, (BUCKET_H - START.y + 0.5 * GRAVITY * d.time * d.time) / d.time, d.z / d.time);
+      this.vel.set(aimX / d.time, (BUCKET_H - this.start.y + 0.5 * GRAVITY * d.time * d.time) / d.time, (d.z - d.stumpZ) / d.time);
       this.spin.set(7, 0, 0); // tumbling forward
       this._takeHull();
       this.state = "fly";
