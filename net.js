@@ -3,9 +3,9 @@
 //   → auth, join, q (queue for a lobby), go (start now), i (one step's input),
 //     n (rename)
 //   ← welcome, hi (the server's rules fingerprint), s (snapshot, 30/s)
-// Snapshots come as binary, in drawvidverse's shared format (wire.js, copied
-// from there by its tools/scripts/copy-wire.sh); the welcome brings their
-// schema. See the server's games/appleroyale/protocol.ts.
+// Snapshots come and inputs go as binary, in drawvidverse's shared format
+// (wire.js, copied from there by its tools/scripts/copy-wire.sh); the
+// welcome brings their schema. See the server's games/appleroyale/protocol.ts.
 
 (function () {
   "use strict";
@@ -73,7 +73,9 @@
 
     input(seq, input) {
       if (performance.now() - this.heardAt > STALL_MS) return;
-      this._send({ t: "i", s: seq, m: input.move, b: input.button });
+      const m = { t: "i", s: seq, m: input.move, b: input.button };
+      if (this.codec && this.codec.has("i")) this._sendRaw(this.codec.encode(m));
+      else this._send(m);
     }
 
     startNow() {
@@ -94,8 +96,12 @@
     }
 
     _send(m) {
+      this._sendRaw(JSON.stringify(m));
+    }
+
+    _sendRaw(data) {
       later(() => {
-        if (this.ws.readyState === WebSocket.OPEN) this.ws.send(JSON.stringify(m));
+        if (this.ws.readyState === WebSocket.OPEN) this.ws.send(data);
       });
     }
   }
