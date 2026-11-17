@@ -48,10 +48,14 @@ const BG_TOP_Y = 170; // tree background extends this high (covers the whole cli
 const TOSS_TREE = new URLSearchParams(location.search).get("tree") === "toss";
 const COLUMN_R = 10; // its wall's radius
 const COLUMN_SCALE_MIN = 1.6;
-const COLUMN_Z = 36; // all of it behind the treetop's cover (20), and in front of the lobby's clouds
-const COLUMN_BASE_H = 12.4; // ground to where the wall starts
+const COLUMN_Z = 60; // all of it (the near half too) behind the apples and grass, and in front of the lobby's clouds
+const COLUMN_BASE_H = 16.1; // ground to where the wall starts
 const COLUMN_H = 3 * 2 * Math.PI * 1.3; // one repeat of the wall
 const COLUMN_TILES = 3; // enough to fill the tallest view at its smallest
+const COLUMN_TOP_H = 9.7; // the dome at its top, scallops and all
+const COLUMN_DEEP = 0.34; // how dark its leaves get, deepest inside
+const COLUMN_OPEN_TIME = 1.4; // seconds for the near half to fade away as a round begins
+const CEILING_FADE_PX = 44; // the blur over the round's top fades in over this
 const GO_BANNER_TIME = 0.6; // "GO!" stays up this long after the countdown
 
 // Online (net.js): other apples are drawn this many steps behind the newest
@@ -295,8 +299,23 @@ class InputManager {
 // ─── RoyaleBranch ────────────────────────────────────────────────────
 // The bark mesh for one core branch (core.js decides who lands on it).
 
+// A platform: the same bark as the trunk, the picture the same size on it.
+const PLATFORM_D = 0.62; // its thickness (the core's top is 0.25 over its middle)
+const PLATFORM_Z = 2.6;
+const BARK_TILE = 9.5; // world units across the bark picture, as on the trunk
+const TRUNK_D = 1.83; // the painted trunk's width
+const TRUNK_Z = 21; // the trunk over the painted one, just in front of the painted leaves
+const TRUNK_LEN = 120; // its length, kept round the view
+
+// Side UVs for a round piece of wood `length` long and `diameter` thick.
+function barkSide(length, diameter) {
+  const side = new BABYLON.Vector4(0, 0, (Math.PI * diameter) / BARK_TILE, length / BARK_TILE);
+  return [side, side, side];
+}
+
 class RoyaleBranch {
-  constructor(scene, x, y, w, barkMat) {
+  constructor(scene, b, mats) {
+    const { x, y, w } = b;
     this.x = x;
     this.y = y;
     this.w = w;
@@ -306,19 +325,20 @@ class RoyaleBranch {
 
     this.visual = BABYLON.MeshBuilder.CreateCylinder(
       "branchVis",
-      { height: w, diameter: 0.5, tessellation: 10 },
+      { height: w, diameter: PLATFORM_D, tessellation: 12, faceUV: barkSide(w, PLATFORM_D) },
       scene,
     );
-    this.visual.position.set(x, y, 2.6);
+    this.visual.position.set(x, y + 0.25 - PLATFORM_D / 2, PLATFORM_Z); // its top where the core's is
     this.visual.rotation.z = Math.PI / 2;
-    this.visual.material = barkMat;
+    this.visual.material = mats.platform;
+    this.visual.isPickable = false;
   }
 
   setPosition(x, y) {
     this.x = x;
     this.y = y;
     this.visual.position.x = x;
-    this.visual.position.y = y;
+    this.visual.position.y = y + 0.25 - PLATFORM_D / 2;
   }
 
   savePrev() {
@@ -328,7 +348,7 @@ class RoyaleBranch {
   }
 
   dispose() {
-    this.visual.dispose();
+    this.visual.dispose(false, false); // the material is shared
   }
 }
 
@@ -847,6 +867,7 @@ class Trophy {
     gold.emissiveColor = new BABYLON.Color3(0.35, 0.24, 0.02);
     gold.specularColor = new BABYLON.Color3(1, 0.95, 0.6);
     gold.specularPower = 20;
+    gold.backFaceCulling = false; // one eye is a mirror image, its faces wound the other way
 
     const wood = new BABYLON.StandardMaterial("trophyWood", scene);
     wood.diffuseTexture = new BABYLON.Texture("./assets/bark.png", scene);
@@ -1097,6 +1118,8 @@ class Game {
     // The lobby's buttons, top right: their own element (the canvas is the
     // action button).
     this.barEl = document.getElementById("bar");
+    this.menuBtn = document.getElementById("menuBtn");
+    this.menuBtn.addEventListener("click", () => this._menu());
     this.barEl.addEventListener("click", (e) => {
       const el = e.target.closest("[data-act]");
       if (!el) return;
@@ -1239,6 +1262,7 @@ class Game {
     crown.position.z = 20; // in front of the tree layer (22) and the far canopy (~40)
     crown.isPickable = false;
     crown.setEnabled(false);
+    if (TOSS_TREE) crown.isVisible = false; // the test tree has a top of its own
     this.crown = crown;
   }
 
@@ -1359,6 +1383,23 @@ class Game {
 
   // Build branches far enough ahead to fill this screen's view (taller on
   // portrait phones). The layout is the same; it's only revealed further up.
+  // The view above the round's solid top is blurred (#ceiling), fading in
+  // over the last stretch below it: a band along the top of the screen
+  // where the top is the screen's, everything above the line where it's
+  // lower (online on a portrait phone).
+  _updateCeilingBlur() {
+    const el = this.ceilingEl || (this.ceilingEl = document.getElementById("ceiling"));
+    let px = 0;
+    if (this.state === "playing" && this.ceilingY !== undefined) {
+      const cam = this.camera;
+      const perPx = (cam.orthoTop - cam.orthoBottom) / this.engine.getRenderingCanvas().clientHeight;
+      px = Math.round(Math.max(0, (cam.position.y + cam.orthoTop - this.ceilingY) / perPx) + CEILING_FADE_PX);
+    }
+    if (px === this.ceilingPx) return;
+    this.ceilingPx = px;
+    el.style.height = `${px}px`;
+  }
+
   // A local round's solid top: the top of the screen, however tall the view
   // (a portrait phone sees twice as far up). Online it's the server's, the
   // same for everyone.
@@ -1412,6 +1453,27 @@ class Game {
     this.treeTex = treeTex;
 
     this.barkMat = createBarkMaterial("bark", scene);
+    // The bark picture on the platforms and the trunk (with the test tree,
+    // its own bark: _buildColumn).
+    const bark = new BABYLON.StandardMaterial("barkWood", scene);
+    bark.diffuseTexture = new BABYLON.Texture("./assets/bark.png", scene);
+    bark.specularColor = BABYLON.Color3.Black();
+    this.branchMats = { platform: bark, trunk: bark };
+    // A trunk of the same bark over the painted tree's (the test tree has
+    // its own), kept round the view (_updateBgScroll). Flattened so it stays
+    // between the treetop's cover and the painted leaves.
+    if (!TOSS_TREE) {
+      const trunk = BABYLON.MeshBuilder.CreateCylinder(
+        "barkTrunk",
+        { height: TRUNK_LEN, diameter: TRUNK_D, tessellation: 16, faceUV: barkSide(TRUNK_LEN, TRUNK_D), cap: BABYLON.Mesh.NO_CAP },
+        scene,
+      );
+      trunk.scaling.z = 0.4;
+      trunk.position.z = TRUNK_Z;
+      trunk.material = this.branchMats.trunk;
+      trunk.isPickable = false;
+      this.barkTrunk = trunk;
+    }
 
     // Load the apple once; instantiate per competitor.
     this.appleContainer = await BABYLON.SceneLoader.LoadAssetContainerAsync(
@@ -1439,6 +1501,8 @@ class Game {
       for (const v of this.views) v.updateEyes(dt);
       if (this.trophy) this.trophy.update(dt, this.state === "over" && this.youWon);
       if (this.lobbyClouds) this.lobbyClouds.update(dt);
+      this._updateCeilingBlur();
+      this._updateColumn(dt);
       if (this.lobbyGrass) this.lobbyGrass.update(dt, 1.2 + 0.8 * Math.sin(0.3 * this.t)); // a breeze, rising and falling
     });
 
@@ -1455,7 +1519,7 @@ class Game {
       const bottom = this.crown.position.y;
       return { ...sides(), bottom, top: bottom + 1 + this.camera.orthoTop - this.camera.orthoBottom };
     });
-    this.lobbyClouds = new Clouds(this, 80, () => ({ ...sides(), bottom: LOBBY_GROUND_Y, top: LOBBY_SKY_TOP }));
+    this.lobbyClouds = new Clouds(this, 130, () => ({ ...sides(), bottom: LOBBY_GROUND_Y, top: LOBBY_SKY_TOP }));
     this.lobbyClouds.show(true);
     this.lobbyClouds.scatter();
     this._showTitle();
@@ -1701,7 +1765,7 @@ class Game {
       live.add(b.id);
       let bv = this.branchViews.get(b.id);
       if (!bv) {
-        bv = new RoyaleBranch(this.scene, b.x, b.y, b.w, this.barkMat);
+        bv = new RoyaleBranch(this.scene, b, this.branchMats);
         this.branchViews.set(b.id, bv);
       }
       // Carrier branches move during the transition; the rest stay put.
@@ -2290,9 +2354,8 @@ class Game {
   _updateBar() {
     let html = "";
     const o = this.online;
-    if (o ? this.state === "lobby" || !o.mirror : this.state === "lobby" || this.state === "over") {
-      html = `<span data-act="menu">Menu</span>`;
-    }
+    const menu = o ? this.state === "lobby" || !o.mirror : this.state === "lobby" || this.state === "over";
+    if (this.menuBtn.hidden === menu) this.menuBtn.hidden = !menu;
     if (o && o.mirror && this.state === "lobby" && o.humans === 1) html += `<span data-act="go" class="on">Start now</span>`;
     if (html !== this.barHtml) {
       this.barHtml = html;
@@ -2443,13 +2506,75 @@ class Game {
     const column = new BABYLON.TransformNode("column", scene);
     column.position.set(0, LOBBY_GROUND_Y, COLUMN_Z);
     column.rotation.y = Math.PI; // its open side to the camera
-    c.rootNodes[0].parent = column;
-    for (const m of c.materials) m.backFaceCulling = false; // the sealed cuts face every way
-    const tile = c.rootNodes[0].getChildren().find((n) => n.name === "column_tile");
+    const root = c.rootNodes[0];
+    root.parent = column;
+    for (const m of c.materials) {
+      m.backFaceCulling = false; // the leaves are seen from both sides
+      m.twoSidedLighting = true;
+    }
+    const parts = (node, name) => node.getChildren().filter((n) => n.name.endsWith(name)); // a copy's are "<copy>.name"
+    const tile = parts(root, "column_tile")[0];
+    for (let i = 1; i < COLUMN_TILES; i++) tile.clone("column_tile", tile.parent);
     this.column = column;
-    this.columnTiles = [tile];
-    for (let i = 1; i < COLUMN_TILES; i++) this.columnTiles.push(tile.clone(`column_tile${i}`, tile.parent));
+
+    // The near half, making the tree whole until a round begins, when it
+    // fades away to show the inside: the tree's outside (the model's
+    // column_front_* pieces: the same shapes, leaves on the outer side with
+    // their faces out), mirrored through the cut to the near side, on
+    // materials of their own to fade.
+    const front = new BABYLON.TransformNode("columnFront", scene);
+    front.parent = column;
+    front.scaling.z = -1;
+    const frontRoot = new BABYLON.TransformNode("columnFrontRoot", scene); // placed as the model's root is
+    frontRoot.parent = front;
+    frontRoot.scaling.copyFrom(root.scaling);
+    frontRoot.rotationQuaternion = root.rotationQuaternion && root.rotationQuaternion.clone();
+    for (const n of root.getChildren().filter((n) => n.name.startsWith("column_front_"))) n.parent = frontRoot;
+    const frontTile = parts(frontRoot, "column_front_tile")[0];
+    for (let i = 1; i < COLUMN_TILES; i++) frontTile.clone("column_front_tile", frontRoot);
+    this.columnFront = front;
+    this.columnFrontMats = new Map();
+    for (const m of frontRoot.getChildMeshes(false)) {
+      if (!m.material) continue;
+      if (!this.columnFrontMats.has(m.material)) {
+        const mat = m.material.clone(`${m.material.name}_front`);
+        mat.needDepthPrePass = true; // fades as one skin, not leaf through leaf
+        mat.transparencyMode = BABYLON.Material.MATERIAL_ALPHABLEND;
+        this.columnFrontMats.set(m.material, mat);
+      }
+      m.material = this.columnFrontMats.get(m.material);
+      m.renderingGroupId = 1; // over the branches, trunk and far half, under the apples
+    }
+    this.columnOpen = 0; // 0 whole … 1 the near half gone
+
+    // The platforms are its trunk's wood.
+    this.branchMats.platform = c.materials.find((m) => /bark/.test(m.name)) || this.branchMats.platform;
+
+    // Inside, the leaves darken with how deep into the tree they are (how
+    // far behind the cut), to none at its edges.
+    for (const m of c.materials) new ColumnDepth(m, this);
+
+    // The pieces of each half: the wall's repeats, and the treetop (seen on
+    // the fall from the title: a dome the shape of the canopy's rounded
+    // bottom, standing on the last whole piece of wall under where the
+    // painted tree's scalloped top would be, which the test does without).
+    this.columnHalves = [[root, "column"], [frontRoot, "column_front"]].map(([r, name]) => ({
+      tiles: parts(r, `${name}_tile`),
+      top: parts(r, `${name}_top`)[0],
+    }));
     for (const m of column.getChildMeshes(false)) m.isPickable = false;
+  }
+
+  // The near half is there in the title and the lobbies, and fades out as a
+  // round begins (and back for the next lobby).
+  _updateColumn(dt) {
+    if (!this.columnFront) return;
+    const whole = this.state === "lobby" || this.state === "title" || this.state === "loading";
+    const to = whole ? 0 : 1;
+    if (this.columnOpen === to) return;
+    this.columnOpen = Math.max(0, Math.min(1, this.columnOpen + ((to ? 1 : -1) * dt) / COLUMN_OPEN_TIME));
+    this.columnFront.setEnabled(this.columnOpen < 1);
+    for (const mat of this.columnFrontMats.values()) mat.alpha = 1 - this.columnOpen;
   }
 
   // Hop the background layers up by whole repeats so the stretch below the
@@ -2461,14 +2586,71 @@ class Game {
     if (this.treePlane) {
       this.treePlane.position.y = Math.max(0, Math.floor(below / this.treeStep)) * this.treeStep;
     }
-    if (this.columnTiles) {
+    if (this.barkTrunk) {
+      const R = BARK_TILE; // hops by whole pictures
+      const k = Math.max(0, Math.floor((this.camera.position.y + this.camera.orthoBottom - LOBBY_GROUND_Y) / R) - 1);
+      this.barkTrunk.position.y = LOBBY_GROUND_Y + k * R + TRUNK_LEN / 2;
+    }
+    if (this.columnHalves) {
       // Wide enough for the view, whatever its shape, with room to spare.
       const scale = Math.max(COLUMN_SCALE_MIN, (this.camera.orthoRight + 3) / COLUMN_R);
       this.column.scaling.setAll(scale);
       const wall = LOBBY_GROUND_Y + COLUMN_BASE_H * scale; // where the repeats start
-      const first = Math.max(0, Math.floor((this.camera.position.y + this.camera.orthoBottom - wall) / (COLUMN_H * scale)));
-      this.columnTiles.forEach((t, i) => (t.position.y = COLUMN_BASE_H + (first + i) * COLUMN_H));
+      let first = Math.max(0, Math.floor((this.camera.position.y + this.camera.orthoBottom - wall) / (COLUMN_H * scale)));
+      // While the treetop is there (the title, and the fall from it), only
+      // as many pieces as fit under it; in a round, on up for ever.
+      const top = !!this.crown && this.crown.isEnabled();
+      const fit = top ? Math.max(0, Math.floor((this.crown.position.y - 1 - COLUMN_TOP_H * scale - wall) / (COLUMN_H * scale))) : Infinity;
+      first = Math.min(first, Math.max(0, fit - COLUMN_TILES));
+      for (const half of this.columnHalves) {
+        half.tiles.forEach((t, i) => {
+          t.setEnabled(first + i < fit);
+          t.position.y = COLUMN_BASE_H + (first + i) * COLUMN_H;
+        });
+        half.top.setEnabled(top);
+        if (top) half.top.position.y = COLUMN_BASE_H + fit * COLUMN_H; // its lowest leaves hang over the wall's top ones
+      }
     }
+  }
+}
+
+// The test tree's leaves, darker the deeper into the tree they are: added
+// to its materials' shaders (the far half's; the near half's are copies made
+// before this is).
+class ColumnDepth extends BABYLON.MaterialPluginBase {
+  constructor(material, game) {
+    super(material, "ColumnDepth", 200, { COLUMNDEPTH: false });
+    this.game = game;
+    this._enable(true);
+  }
+
+  getClassName() {
+    return "ColumnDepth";
+  }
+
+  prepareDefines(defines) {
+    defines.COLUMNDEPTH = true;
+  }
+
+  getUniforms() {
+    return { ubo: [{ name: "columnDepth", size: 2, type: "vec2" }], fragment: "uniform vec2 columnDepth;" };
+  }
+
+  // Where the cut is, and how deep the tree goes behind it.
+  bindForSubMesh(uniformBuffer) {
+    uniformBuffer.updateFloat2("columnDepth", COLUMN_Z, COLUMN_R * this.game.column.scaling.x);
+  }
+
+  getCustomCode(shaderType) {
+    if (shaderType !== "fragment") return null;
+    return {
+      CUSTOM_FRAGMENT_BEFORE_FRAGCOLOR: `
+#ifdef COLUMNDEPTH
+        float columnIn = smoothstep(0.0, 1.0, (vPositionW.z - columnDepth.x) / columnDepth.y);
+        finalColor.rgb *= mix(1.0, ${COLUMN_DEEP}, columnIn);
+#endif
+      `,
+    };
   }
 }
 

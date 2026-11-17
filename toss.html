@@ -38,20 +38,33 @@
         touch-action: none;
         outline: none;
       }
-      #hud,
-      #menu {
-        position: absolute;
-        top: 12px;
-        font-size: clamp(18px, 5vw, 26px);
-      }
+      /* Menu at the top left; the running score at the top right. */
       #hud {
-        left: 14px;
+        position: absolute;
+        top: 14px;
+        right: 14px;
+        font-size: clamp(18px, 5vw, 26px);
         pointer-events: none;
       }
       #menu {
-        right: 14px;
+        position: absolute;
+        top: 12px;
+        left: 14px;
+        font: inherit;
+        font-size: clamp(17px, 4.6vw, 21px);
         color: #fff;
         text-decoration: none;
+        background: #d8262b;
+        border: 3px solid #2a1208;
+        border-radius: 12px;
+        padding: 4px 14px 2px;
+        box-shadow: 0 4px 0 #2a1208;
+        text-shadow: 0 2px 0 rgba(0, 0, 0, 0.35);
+        cursor: pointer;
+      }
+      #menu:active {
+        transform: translateY(3px);
+        box-shadow: 0 1px 0 #2a1208;
       }
       /* The wind: an arrow the way it blows and how hard, as in Paper Toss. */
       #wind {
@@ -99,8 +112,8 @@
   </head>
   <body>
     <canvas id="renderCanvas"></canvas>
-    <div id="hud"></div>
     <a id="menu" href="./">Menu</a>
+    <div id="hud"></div>
     <div id="wind"></div>
     <div id="dist" role="radiogroup" aria-label="Distance"></div>
 

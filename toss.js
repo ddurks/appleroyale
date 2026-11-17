@@ -117,7 +117,7 @@ const CLOUD_RECTS = [
 ];
 const CLOUD_COUNT = 10;
 const CLOUD_Z = 170;
-const CLOUD_W = [0.1, 0.35]; // widths as a share of the view's height out there, farthest to nearest
+const CLOUD_W = [0.05, 0.17]; // widths as a share of the view's height out there, farthest to nearest
 // How fast they drift with the wind, per second per unit of wind, likewise:
 // the higher clouds faster, the lower a little slower.
 const CLOUD_SPEED = [0.009, 0.016];

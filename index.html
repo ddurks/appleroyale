@@ -44,11 +44,37 @@
         touch-action: none;
         outline: none;
       }
-      /* Game status, top left: one short line. */
-      #hud {
+      /* Top left: the Menu button (red, as the title's buttons), then the
+         game status, one short line. */
+      #topleft {
         position: absolute;
         top: 12px;
         left: 14px;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+      }
+      #menuBtn {
+        font: inherit;
+        font-size: clamp(17px, 4.6vw, 21px);
+        color: #fff;
+        text-decoration: none;
+        background: #d8262b;
+        border: 3px solid #2a1208;
+        border-radius: 12px;
+        padding: 4px 14px 2px;
+        box-shadow: 0 4px 0 #2a1208;
+        text-shadow: 0 2px 0 rgba(0, 0, 0, 0.35);
+        cursor: pointer;
+      }
+      #menuBtn[hidden] {
+        display: none;
+      }
+      #menuBtn:active {
+        transform: translateY(3px);
+        box-shadow: 0 1px 0 #2a1208;
+      }
+      #hud {
         color: #fff;
         /* Scales down on narrow phones so it never reaches the name box. */
         font-size: clamp(16px, 4.2vw, 24px);
@@ -145,6 +171,20 @@
         color: #fff;
         background: rgba(0, 0, 0, 0.65);
         font-weight: 700;
+      }
+      /* A blur over the view above the round's solid top (sized by
+         royale.js), fading in over its last 44px. */
+      #ceiling {
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        height: 0;
+        pointer-events: none;
+        -webkit-backdrop-filter: blur(7px);
+        backdrop-filter: blur(7px);
+        -webkit-mask-image: linear-gradient(to top, transparent, #000 44px);
+        mask-image: linear-gradient(to top, transparent, #000 44px);
       }
       #banner {
         position: absolute;
@@ -344,8 +384,12 @@
   </head>
   <body>
     <canvas id="renderCanvas"></canvas>
+    <div id="ceiling"></div>
     <div id="names"></div>
-    <div id="hud"></div>
+    <div id="topleft">
+      <button id="menuBtn" data-act="menu" hidden>Menu</button>
+      <div id="hud"></div>
+    </div>
     <div id="topright">
       <input id="name" maxlength="16" placeholder="Your name" autocomplete="off" spellcheck="false" aria-label="Your name" />
       <div id="bar"></div>

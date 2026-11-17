@@ -42,13 +42,17 @@ goes on — stay in frame to stay alive. The top of the screen is a ceiling
   top of the green and no higher, with a row behind them standing on the
   green two thirds of the way up them, and clouds drifting through the
   sky under the tree.
+- The platforms are bark-textured and bright (`RoyaleBranch`).
+- **Menu** is the red button at the top left (on Apple Toss and Apple Run
+  too).
 - Win and you get the trophy in the middle of the screen, in place of any
   words: a golden apple on a low block of wood with gold plaques engraved
   "apple royale", turning in a gold glow under the title's "apple royale"
   (`Trophy` in `royale.js`).
 - In a local game the solid top is the top of your screen, however tall
   (the core's `ceiling` option); online it's the server's, the same height
-  for everyone, which on a portrait phone is about half-way up.
+  for everyone, which on a portrait phone is about half-way up. The view
+  above the top is blurred, fading in just under it.
 - Faces react: grimace when stomped, yell while pounding, frown near the
   bottom of the screen, "o" while rising, grin near the top.
 - The rules live in `core.js` (no graphics; fixed 1/60 s steps), shared by
