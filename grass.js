@@ -56,36 +56,15 @@ void main() {
 class Grass {
   // `matrices`: 16 numbers a blade (a Float32Array filled by Grass.blade).
   constructor(scene, matrices) {
-    // One blade: a tapering strip, curved a little, a unit tall and wide.
-    const LEVELS = 4;
-    const positions = [];
-    const uvs = [];
-    const indices = [];
-    for (let i = 0; i <= LEVELS; i++) {
-      const t = i / LEVELS;
-      const half = 0.5 * (1 - 0.9 * t);
-      positions.push(-half, t, 0.25 * t * t, half, t, 0.25 * t * t);
-      uvs.push(0, t, 1, t);
-      if (i < LEVELS) indices.push(2 * i, 2 * i + 1, 2 * i + 2, 2 * i + 1, 2 * i + 3, 2 * i + 2);
-    }
-    const blade = new BABYLON.Mesh("grass", scene);
-    const vd = new BABYLON.VertexData();
-    vd.positions = positions;
-    vd.uvs = uvs;
-    vd.indices = indices;
-    vd.applyToMesh(blade);
-
-    blade.thinInstanceSetBuffer("matrix", matrices, 16, true);
-    blade.alwaysSelectAsActiveMesh = true;
-    blade.isPickable = false;
-
+    this.scene = scene;
+    this.mesh = this._blades(matrices, 4);
+    this.meshes = [this.mesh];
     this.mat = new BABYLON.ShaderMaterial("grassMat", scene, "grass", {
       attributes: ["position", "uv"],
       uniforms: ["world", "viewProjection", "time", "wind", "gustAt"],
     });
     this.mat.backFaceCulling = false;
-    blade.material = this.mat;
-    this.mesh = blade;
+    this.mesh.material = this.mat;
     this.time = 0;
     this.wind = 0;
     this.windV = 0; // how fast the wind is changing
@@ -111,8 +90,49 @@ class Grass {
     this.mat.setVector2("gustAt", this.gustAt);
   }
 
+  // More blades, far off, in fewer pieces (a far blade is a few pixels:
+  // its curve can't be seen, only what it costs).
+  addLayer(matrices, levels) {
+    const mesh = this._blades(matrices, levels);
+    mesh.material = this.mat;
+    this.meshes.push(mesh);
+    return mesh;
+  }
+
+  // One blade, a tapering strip curved a little, a unit tall and wide, in
+  // `levels` pieces up its length, drawn once per matrix.
+  _blades(matrices, levels) {
+    const positions = [];
+    const uvs = [];
+    const indices = [];
+    for (let i = 0; i <= levels; i++) {
+      const t = i / levels;
+      const half = 0.5 * (1 - 0.9 * t);
+      positions.push(-half, t, 0.25 * t * t, half, t, 0.25 * t * t);
+      uvs.push(0, t, 1, t);
+      if (i < levels) indices.push(2 * i, 2 * i + 1, 2 * i + 2, 2 * i + 1, 2 * i + 3, 2 * i + 2);
+    }
+    const blade = new BABYLON.Mesh("grass", this.scene);
+    const vd = new BABYLON.VertexData();
+    vd.positions = positions;
+    vd.uvs = uvs;
+    vd.indices = indices;
+    vd.applyToMesh(blade);
+    blade.thinInstanceSetBuffer("matrix", matrices, 16, true);
+    blade.allBlades = matrices.length / 16;
+    blade.alwaysSelectAsActiveMesh = true;
+    blade.isPickable = false;
+    return blade;
+  }
+
+  // Draw only this share of the blades (they're sown in no order, so any
+  // share of them is an even spread).
+  thin(share) {
+    for (const m of this.meshes) m.thinInstanceCount = Math.floor(share * m.allBlades);
+  }
+
   dispose() {
-    this.mesh.dispose();
+    for (const m of this.meshes) m.dispose();
     this.mat.dispose();
   }
 

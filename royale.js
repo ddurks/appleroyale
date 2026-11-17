@@ -12,7 +12,8 @@
 // between steps so motion stays smooth at any frame rate.
 // ═══════════════════════════════════════════════════════════════════════
 
-const V3 = BABYLON.Vector3;
+// Needs common.js, logo.js, grass.js, sliceBurst.js, core.js, net.js, bots.js.
+
 const { C, Round } = APPLE_CORE;
 const {
   DT, CAMERA_HALF_HEIGHT, NUM_APPLES, APPLE_FOOT, APPLE_X_LIMIT, JUMP_IMPULSE,
@@ -23,8 +24,7 @@ const {
 
 const ANIM_BLEND_SPEED = 0.15; // per-frame blend weight step between clips (~0.1s)
 
-// Faces (assets/faces/*.png) swapped on the face decal to match the moment.
-const FACE_NAMES = ["elated", "o", "frown", "grimace", "woah"];
+// Faces (common.js FACES) swapped on the face decal to match the moment.
 const FACE_HURT_TIME = 0.7; // grimace this long after being stomped
 const FACE_DANGER = 4; // frown within this of the bottom of the screen
 const FACE_TOP = 7; // elated within this of the top of the screen
@@ -36,16 +36,12 @@ const EYE_MAX_PITCH = 0.22;
 const EYE_LERP = 7;
 
 const LOBBY_TIME = 8; // seconds to mill about before the round starts
-const BG_BOTTOM_Y = -8; // bottom edge of the world-space tree background
-const BG_TOP_Y = 170; // tree background extends this high (covers the whole climb)
-// A test (add ?tree=toss to the address): in place of the painted leaves,
-// tree and trunk, the Apple Toss tree opened down its middle and seen from
-// the front (assets/treecolumn.glb, from appletree.blend's RoyaleColumn
-// scene): its trunk up from the ground, the far half of its canopy's
-// rounded bottom, then the far half of its leafy wall, a piece that repeats
+// The tree: the Apple Toss tree opened down its middle and seen from the
+// front (assets/treecolumn.glb, from appletree.blend's RoyaleColumn scene):
+// its trunk up from the ground, the far half of its canopy's rounded
+// bottom, then the far half of its leafy wall, a piece that repeats
 // exactly, stacked on up for ever. It's shown big enough that its sides are
 // past the screen's (_updateBgScroll). Sizes are the model's.
-const TOSS_TREE = new URLSearchParams(location.search).get("tree") === "toss";
 const COLUMN_R = 10; // its wall's radius
 const COLUMN_SCALE_MIN = 1.6;
 const COLUMN_Z = 60; // all of it (the near half too) behind the apples and grass, and in front of the lobby's clouds
@@ -55,7 +51,6 @@ const COLUMN_TILES = 3; // enough to fill the tallest view at its smallest
 const COLUMN_TOP_H = 9.7; // the dome at its top, scallops and all
 const COLUMN_DEEP = 0.34; // how dark its leaves get, deepest inside
 const COLUMN_OPEN_TIME = 1.4; // seconds for the near half to fade away as a round begins
-const CEILING_FADE_PX = 44; // the blur over the round's top fades in over this
 const GO_BANNER_TIME = 0.6; // "GO!" stays up this long after the countdown
 
 // Online (net.js): other apples are drawn this many steps behind the newest
@@ -71,22 +66,6 @@ const ME_FIELDS = [
   "dropThrough", "squish", "squishV", "squishHold", "button",
 ];
 const CORRECTION_DECAY = 12; // 1/s: how fast a prediction correction is eased out
-
-// Bottom edge of both canopy layers, in world units above BG_BOTTOM_Y: one big
-// cartoon arc (lowest at the trunk, curving up toward the screen edges) whose
-// outline is a row of round scallops. Never below 0, so the leaf texture's
-// vertical wrap seam stays out of view.
-const CANOPY_ARC_R = 46; // radius of the circular arc (~8 units of rise at x = ±26)
-const CANOPY_ARC_HALF_W = 40; // the arc spans ±this (off-screen); flat beyond
-const CANOPY_SCALLOP_W = 4.4; // width of one round bump
-const CANOPY_SCALLOP_D = 1.9; // how far each bump hangs below its cusps
-function canopyEdge(x) {
-  const ax = Math.min(Math.abs(x), CANOPY_ARC_HALF_W);
-  const arc = CANOPY_ARC_R - Math.sqrt(CANOPY_ARC_R * CANOPY_ARC_R - ax * ax);
-  // -1..1 across each bump; one bump is centered on the trunk
-  const u = ((((x / CANOPY_SCALLOP_W + 0.5) % 1) + 1) % 1) * 2 - 1;
-  return arc + CANOPY_SCALLOP_D * (1 - Math.sqrt(1 - u * u));
-}
 
 // Horizontal camera follow — keeps the human on screen on narrow (mobile)
 // aspect ratios; on wide screens the whole field fits and the camera stays put.
@@ -114,34 +93,10 @@ const BOT_TIERS = [
   { name: "Hard", level: 0.6 },
 ];
 const DIFFICULTY_KEY = "appleRoyale.difficulty";
-// Title screen (TitleScreen): the logo's words swell this much as the apple
-// rises in its idle, and the apple pulls a face every so often.
-const TITLE_PULSE = 0.06;
-const TITLE_APPLE_H = 0.75; // the apple's height, in the words' heights
-const TITLE_FACE_EVERY = 2.2; // seconds between faces (±40%)
-const TITLE_FACE_HOLD = 1.1;
 // Leaving the title, the camera falls from the sky past the treetop (its
 // crown sits CROWN_SCREENS screens of canopy above the lobby's view) and
-// down to the lobby, over DESCENT_TIME seconds.
+// down to the lobby (logo.js FALL_TIME), the logo's apple coming along.
 const CROWN_SCREENS = 2;
-const DESCENT_TIME = 2.6;
-// The logo's apple comes along (TitleScreen.drop): it squashes and shrinks
-// to game size, hops, rides down the screen and lands as the camera
-// settles, bounces twice (heights in world units, durations in seconds)
-// and becomes your apple.
-const DROP_SHRINK = 0.35;
-const DROP_HOP = 0.07; // of the view's height
-const DROP_SLAM = 0.35; // the last part of the ride, falling to the ground
-const DROP_BOUNCES = [[1.5, 0.42], [0.45, 0.24]];
-const DROP_SETTLE = 0.16;
-const DROP_END = DESCENT_TIME + DROP_BOUNCES.reduce((t, b) => t + b[1], 0) + DROP_SETTLE;
-// Clouds in that sky (Clouds): BIGCORP's atlas (assets/clouds.png, 1024×240,
-// white shapes whose brightness is the alpha), each cloud's [x, y, w, h].
-const CLOUD_RECTS = [
-  [0, 0, 212, 136], [214, 0, 241, 117], [457, 0, 191, 115], [650, 0, 158, 114], [810, 0, 199, 105],
-  [0, 138, 284, 102], [286, 138, 174, 100], [462, 138, 304, 70], [768, 138, 105, 51], [875, 138, 102, 51],
-];
-const CLOUD_COUNT = 10;
 const LOBBY_SKY_TOP = -6; // about where the tree's leaves begin, over the lobby
 // The lobby's grass (grass.js).
 const LOBBY_GRASS_PER = 110; // blades to a unit of ground each way
@@ -149,6 +104,7 @@ const LOBBY_GRASS_MOST = 40000;
 const LOBBY_GRASS_BEHIND = 44; // blades to a unit along the row behind the apples
 const APPLE_BODY = 1.7; // how tall an apple stands, without its stem
 const LOBBY_GRASS_REACH = 32; // at most this far either side of the middle
+// Clouds (common.js Clouds) in the sky over the treetop and the lobby's.
 const CLOUD_W = [2.5, 9]; // world-unit widths, farthest (lowest) to nearest (highest)
 const CLOUD_SPEED = [0.35, 1.5]; // units/s, likewise
 const NAME_KEY = "appleRoyale.name";
@@ -175,16 +131,6 @@ const BOT_NAMES = [
 
 // A key pressed while typing in the name box.
 const typing = (e) => e.target && e.target.tagName === "INPUT";
-
-// ─── Bark Material ───────────────────────────────────────────────────
-
-function createBarkMaterial(name, scene) {
-  const mat = new BABYLON.StandardMaterial(name, scene);
-  mat.diffuseColor = BABYLON.Color3.FromHexString("#65493A");
-  mat.specularColor = BABYLON.Color3.Black();
-  mat.roughness = 1;
-  return mat;
-}
 
 // ─── InputManager ────────────────────────────────────────────────────
 
@@ -303,9 +249,6 @@ class InputManager {
 const PLATFORM_D = 0.62; // its thickness (the core's top is 0.25 over its middle)
 const PLATFORM_Z = 2.6;
 const BARK_TILE = 9.5; // world units across the bark picture, as on the trunk
-const TRUNK_D = 1.83; // the painted trunk's width
-const TRUNK_Z = 21; // the trunk over the painted one, just in front of the painted leaves
-const TRUNK_LEN = 120; // its length, kept round the view
 
 // Side UVs for a round piece of wood `length` long and `diameter` thick.
 function barkSide(length, diameter) {
@@ -417,12 +360,7 @@ class AppleView {
     this.root.parent = this.squashNode;
     for (const m of this.root.getChildMeshes(false)) m.renderingGroupId = 2;
     // Each apple gets its own face material so expressions don't sync up.
-    const faceMesh = this.root.getChildMeshes(false).find((m) => /_face$/.test(m.name));
-    if (faceMesh) {
-      this.faceMat = faceMesh.material.clone(`face${this.index}`);
-      faceMesh.material = this.faceMat;
-      this.faceDefault = this.faceMat.albedoTexture || this.faceMat.diffuseTexture;
-    }
+    this.faceSwap = new Face(this.root, this.game.faceTextures, `face${this.index}`);
 
     for (const ag of inst.animationGroups) {
       ag.stop();
@@ -549,12 +487,10 @@ class AppleView {
   }
 
   _setFace(name) {
-    const tex = name === "default" ? this.faceDefault : this.game.faceTextures[name];
-    if (!this.faceMat || !tex) return;
+    if (!this.faceSwap) return;
     this.face = name;
     this.faceHeld = 0;
-    if (this.faceMat.albedoTexture !== undefined) this.faceMat.albedoTexture = tex;
-    else this.faceMat.diffuseTexture = tex;
+    this.faceSwap.set(name === "default" ? null : name);
   }
   // Rotate the eyeballs toward the direction of travel. Runs after the
   // animation pass so it overrides the animated bone pose.
@@ -663,182 +599,6 @@ function applyFullState(a, st, round) {
   });
   a.standingBranch = byId(st[ME_FIELDS.length]);
   a.passBranch = byId(st[ME_FIELDS.length + 1]);
-}
-
-// ─── TitleScreen ─────────────────────────────────────────────────────
-// The logo: "apple royale" in 3D (assets/title.glb, made by
-// tools/title_glb.py from the Drawvid Hand font) over an idling apple. The
-// words swell as the apple rises in its idle, and the apple pulls a face now
-// and then. The menu under it is HTML (index.html #title).
-
-class TitleScreen {
-  constructor(game, wordsContainer) {
-    this.game = game;
-    const scene = game.scene;
-    this.root = new BABYLON.TransformNode("title", scene);
-    const part = (name, container) => {
-      const node = new BABYLON.TransformNode(name, scene);
-      node.parent = this.root;
-      const inst = container.instantiateModelsToScene((n) => `${name}_${n}`, false);
-      inst.rootNodes[0].parent = node;
-      for (const m of node.getChildMeshes(false)) {
-        m.renderingGroupId = 2;
-        m.isPickable = false;
-        m.computeWorldMatrix(true);
-      }
-      const { min, max } = node.getHierarchyBoundingVectors();
-      return { node, inst, w: max.x - min.x, h: max.y - min.y, mid: (max.y + min.y) / 2 };
-    };
-    this.words = part("titleWords", wordsContainer);
-    this.words.node.rotation.y = Math.PI; // the export faces away from our camera
-    this.apple = part("titleApple", game.appleContainer);
-
-    // Its own face material, as in AppleView.attachModel.
-    const faceMesh = this.apple.node.getChildMeshes(false).find((m) => /_face$/.test(m.name));
-    this.faceMat = faceMesh.material.clone("titleFace");
-    faceMesh.material = this.faceMat;
-    this.faceDefault = this.faceMat.albedoTexture || this.faceMat.diffuseTexture;
-    this.face = null; // the face being pulled, or null for the default
-    this.faceT = TITLE_FACE_EVERY;
-
-    for (const ag of this.apple.inst.animationGroups) ag.stop();
-    this.idle = this.apple.inst.animationGroups.find((ag) => ag.name.toLowerCase().includes("idle"));
-    this.scale = 1;
-    this.show(false);
-  }
-
-  show(on) {
-    this.root.setEnabled(on);
-    if (!this.idle) return;
-    if (on) this.idle.start(true, 2);
-    else this.idle.stop();
-  }
-
-  update(dt) {
-    this._layout();
-    // Where the apple is in its idle: 0 standing tall, ½ crouched lowest.
-    const a = this.idle && this.idle.animatables[0];
-    const phase = a ? (a.masterFrame - this.idle.from) / (this.idle.to - this.idle.from) : 0;
-    this.words.node.scaling.setAll(this.scale * (1 + TITLE_PULSE * Math.cos(2 * Math.PI * phase)));
-
-    this.faceT -= dt;
-    if (this.faceT > 0) return;
-    if (this.face) {
-      this._setFace(null);
-      this.faceT = TITLE_FACE_EVERY * (0.6 + 0.8 * Math.random());
-    } else {
-      const others = FACE_NAMES.filter((f) => f !== this.lastFace);
-      this._setFace(others[Math.floor(Math.random() * others.length)]);
-      this.faceT = TITLE_FACE_HOLD;
-    }
-  }
-
-  // Ready the apple to leave the logo: where it is, and how big.
-  startDrop() {
-    const n = this.apple.node;
-    this.drop = { x0: n.position.x, y0: n.position.y, k0: n.scaling.y, off0: 0, prevY: null, face: null };
-  }
-
-  // The apple t seconds into the fall, given the camera's height now, at
-  // the launch and at the end, and where your apple stands (feet). Squash
-  // s > 0 is flat and wide, s < 0 tall and thin, pivoting on the feet as
-  // AppleView's does.
-  dropFrame(t, dt, camY, camYAtLaunch, camYEnd, land, viewH) {
-    const d = this.drop;
-    const n = this.apple.node;
-    let x, y, k, s;
-    let face = "default";
-    if (t < DROP_SHRINK) {
-      // Shrink to game size, crouching for the jump.
-      const f = t / DROP_SHRINK;
-      const e = f * f * (3 - 2 * f);
-      x = d.x0;
-      y = d.y0;
-      k = d.k0 + (1 - d.k0) * e;
-      s = 0.4 * f * f;
-    } else if (t < DESCENT_TIME) {
-      // Ride down with the camera, holding its place on the screen (a hop
-      // first), then fall the rest of the way to where your apple stands,
-      // faster and faster, landing as the camera settles.
-      if (!d.launched) {
-        d.launched = true;
-        d.off0 = d.y0 - camYAtLaunch;
-        if (this.idle) this.idle.stop();
-      }
-      const u = (t - DROP_SHRINK) / (DESCENT_TIME - DROP_SHRINK);
-      const off1 = land.y - camYEnd;
-      const hop = u < 0.35 ? DROP_HOP * viewH * Math.sin((Math.PI * u) / 0.35) : 0;
-      const slam = Math.max(0, (u - (1 - DROP_SLAM)) / DROP_SLAM);
-      const off = d.off0 + (off1 - d.off0) * slam * slam + hop;
-      const ux = u * u * (3 - 2 * u);
-      x = d.x0 + (land.x - d.x0) * ux;
-      y = camY + off;
-      k = 1;
-      // Stretched by how fast it's really falling.
-      const v = d.prevY === null ? 0 : (y - d.prevY) / Math.max(dt, 1e-3);
-      d.prevY = y;
-      s = -Math.min(0.32, 0.02 * Math.abs(v));
-      face = v > 0 ? "o" : "woah";
-    } else {
-      // Landed: two bounces, a squash at each touchdown, then settle.
-      let tc = DESCENT_TIME; // the last touchdown
-      let h = 0;
-      let amp = 0.55;
-      let air = 0;
-      for (const [bh, bd] of DROP_BOUNCES) {
-        if (t < tc + bd) {
-          const v = (t - tc) / bd;
-          h = 4 * bh * v * (1 - v);
-          air = 1 - 2 * v; // rising +1 … falling -1
-          break;
-        }
-        tc += bd;
-        amp *= 0.55;
-      }
-      x = land.x;
-      y = land.y + h;
-      k = 1;
-      const since = t - tc;
-      s = amp * Math.exp(-since / 0.09) - (h > 0 ? 0.12 * Math.abs(air) : 0);
-      face = t - DESCENT_TIME < 0.22 ? "grimace" : "elated";
-    }
-    n.position.set(x, y, 0);
-    n.scaling.set(k * (1 + 0.6 * s), k * (1 - 0.7 * s), k * (1 + 0.6 * s));
-    if (face !== d.face) {
-      d.face = face;
-      this._setFace(face === "default" ? null : face);
-    }
-  }
-
-  _setFace(name) {
-    if (name) this.lastFace = name;
-    this.face = name;
-    const tex = name ? this.game.faceTextures[name] : this.faceDefault;
-    if (this.faceMat.albedoTexture !== undefined) this.faceMat.albedoTexture = tex;
-    else this.faceMat.diffuseTexture = tex;
-  }
-
-  // Fit the logo (words, a gap, the apple) between the name box and the menu,
-  // as big as the screen allows.
-  _layout() {
-    const cam = this.game.camera;
-    const canvas = this.game.engine.getRenderingCanvas();
-    const box = canvas.getBoundingClientRect();
-    const perPx = (cam.orthoTop - cam.orthoBottom) / box.height;
-    const menuTop = document.getElementById("title").getBoundingClientRect().top - box.top;
-    const top = cam.position.y + cam.orthoTop - 64 * perPx;
-    const bottom = cam.position.y + cam.orthoTop - (menuTop - 16) * perPx;
-    const w = this.words;
-    const tall = w.h * (1 + TITLE_PULSE) + w.h * (0.08 + TITLE_APPLE_H);
-    const s = Math.max(0, Math.min((0.9 * (cam.orthoRight - cam.orthoLeft)) / (w.w * (1 + TITLE_PULSE)), (top - bottom) / tall));
-    this.scale = s;
-    const blockTop = (top + bottom) / 2 + (s * tall) / 2;
-    const wordsMid = blockTop - (s * w.h * (1 + TITLE_PULSE)) / 2;
-    w.node.position.set(cam.position.x, wordsMid - s * w.mid, 0);
-    const k = (s * w.h * TITLE_APPLE_H) / this.apple.h;
-    this.apple.node.scaling.setAll(k);
-    this.apple.node.position.set(cam.position.x, blockTop - s * tall - k * (this.apple.mid - this.apple.h / 2), 0);
-  }
 }
 
 // ─── Trophy ──────────────────────────────────────────────────────────
@@ -996,82 +756,12 @@ class Trophy {
   }
 }
 
-// ─── Clouds ──────────────────────────────────────────────────────────
-// The sky above the treetop, on the title and the fall from it: clouds
-// drifting left to right. Lower ones are farther away (smaller, slower,
-// behind); higher ones nearer (bigger, faster, in front). One that leaves on
-// the right comes back off the left at a new height, shape and facing.
-
-class Clouds {
-  // band(): the sky they keep to ({ left, right, bottom, top }); z: how far back.
-  constructor(game, z, band) {
-    this.game = game;
-    this.z = z;
-    this._band = band;
-    const scene = game.scene;
-    const tex = new BABYLON.Texture("./assets/clouds.png", scene);
-    tex.getAlphaFromRGB = true;
-    tex.wrapU = tex.wrapV = BABYLON.Texture.CLAMP_ADDRESSMODE;
-    const mat = new BABYLON.StandardMaterial("cloudMat", scene);
-    mat.emissiveColor = new BABYLON.Color3(1, 1, 1);
-    mat.disableLighting = true;
-    mat.opacityTexture = tex;
-    mat.backFaceCulling = false; // a mirrored cloud is a flipped plane
-    this.clouds = [];
-    for (let i = 0; i < CLOUD_COUNT; i++) {
-      const mesh = BABYLON.MeshBuilder.CreatePlane(`cloud${i}`, { size: 1, updatable: true }, scene);
-      mesh.material = mat;
-      mesh.isPickable = false;
-      this.clouds.push({ mesh, w: 0, speed: 0 });
-    }
-    this.show(false);
-  }
-
-  show(on) {
-    for (const c of this.clouds) c.mesh.setEnabled(on);
-  }
-
-  // A fresh sky, clouds anywhere across the view.
-  scatter() {
-    const { left, right } = this._band();
-    for (const c of this.clouds) this._spawn(c, left + Math.random() * (right - left));
-  }
-
-  update(dt) {
-    const { left, right } = this._band();
-    for (const c of this.clouds) {
-      c.mesh.position.x += c.speed * dt;
-      if (c.mesh.position.x - c.w / 2 > right) this._spawn(c, null, left);
-    }
-  }
-
-  // A new cloud at x (or just off the left edge): random nearness, which
-  // sets its height, size, speed and depth; random shape and facing.
-  _spawn(c, x, left) {
-    const band = this._band();
-    const near = Math.random();
-    const [rx, ry, rw, rh] = CLOUD_RECTS[Math.floor(Math.random() * CLOUD_RECTS.length)];
-    const w = CLOUD_W[0] + (CLOUD_W[1] - CLOUD_W[0]) * near;
-    const h = (w * rh) / rw;
-    const u0 = rx / 1024, u1 = (rx + rw) / 1024;
-    const vTop = 1 - ry / 240, vBot = 1 - (ry + rh) / 240;
-    c.mesh.updateVerticesData(BABYLON.VertexBuffer.UVKind, [u0, vBot, u1, vBot, u1, vTop, u0, vTop]);
-    c.mesh.scaling.set(Math.random() < 0.5 ? -w : w, h, 1);
-    c.w = w;
-    c.speed = (CLOUD_SPEED[0] + (CLOUD_SPEED[1] - CLOUD_SPEED[0]) * near) * (0.9 + 0.2 * Math.random());
-    // Clear of the band's bottom and top.
-    const lo = band.bottom + h / 2 + 0.5;
-    const hi = Math.max(lo, band.top - h / 2 - 0.5);
-    c.mesh.position.set(x ?? left - w / 2 - Math.random() * 3, lo + (hi - lo) * near, this.z - near);
-  }
-}
-
 // ─── Game ────────────────────────────────────────────────────────────
 
 class Game {
   constructor(canvas) {
     this.engine = new BABYLON.Engine(canvas, true);
-    this.scene = new BABYLON.Scene(this.engine);
+    Object.assign(this, makeScene(this.engine));
     this.input = new InputManager();
 
     this.round = null; // the core round (core.js); also the bots' `world`
@@ -1092,10 +782,8 @@ class Game {
     this.shakeKind = "hit";
     this.shakeOff = { x: 0, y: 0 }; // applied to the camera for this frame only
     this.difficulty = 1; // Normal
-    try {
-      const d = localStorage.getItem(DIFFICULTY_KEY);
-      if (d !== null && BOT_TIERS[+d]) this.difficulty = +d;
-    } catch (e) {}
+    const d = store.get(DIFFICULTY_KEY);
+    if (d !== null && BOT_TIERS[+d]) this.difficulty = +d;
     this.online = null; // online state while connected (see _goOnline)
     window.addEventListener("keydown", (e) => {
       if (typing(e)) return;
@@ -1105,15 +793,18 @@ class Game {
         if (e.code === "Enter" || e.code === "KeyL") this._play(false);
         if (e.code === "KeyO") this._play(true);
       } else if (e.code === "Escape") this._menu();
+      if (this.solo) return; // its own keys
       if (e.code === "KeyG") this._startNow();
     });
     // The title menu: Local / Online, and one choice each of bots and controls.
     document.getElementById("title").addEventListener("click", (e) => {
       const el = e.target.closest("[data-tier], [data-ctl], [data-act]");
       if (!el || this.state !== "title") return;
+      const act = el.dataset.act;
       if (el.dataset.tier) this._setDifficulty(+el.dataset.tier);
       else if (el.dataset.ctl) this._setTilt(el.dataset.ctl === "tilt");
-      else this._play(el.dataset.act === "online");
+      else if (act === "toss" || act === "run") this._playSolo(act, el);
+      else this._play(act === "online");
     });
     // The lobby's buttons, top right: their own element (the canvas is the
     // action button).
@@ -1128,18 +819,13 @@ class Game {
     });
 
     // Tilt, if it was on last time. iOS asks again on the first tap.
-    try {
-      if (localStorage.getItem(TILT_KEY) && isTouch()) {
-        this._applyTilt(true);
-        window.addEventListener("touchend", () => askTilt().then((ok) => ok || this._applyTilt(false)), { once: true });
-      }
-    } catch (e) {}
+    if (store.get(TILT_KEY) && isTouch()) {
+      this._applyTilt(true);
+      window.addEventListener("touchend", () => askTilt().then((ok) => ok || this._applyTilt(false)), { once: true });
+    }
 
     // Your name: top right, editable any time; shown under your apple.
-    this.playerName = "";
-    try {
-      this.playerName = localStorage.getItem(NAME_KEY) || "";
-    } catch (e) {}
+    this.playerName = store.get(NAME_KEY, "");
     this.nameEl = document.getElementById("name");
     if (this.nameEl) {
       this.nameEl.value = this.playerName;
@@ -1154,26 +840,37 @@ class Game {
     window.royale = this; // handy for debugging in the console
 
     this._init().then(() => {
+      this.fader = new Fader(this.engine);
+      this.quality = new Quality([() => this.engine.setHardwareScalingLevel(1.5)]); // fewer pixels, on a device struggling to keep up
+      // One loop for the page: the title and Royale, or the solo game being
+      // played; over either, the last one's picture fading away.
       this.engine.runRenderLoop(() => {
-        const dt = Math.min(this.engine.getDeltaTime() / 1000, 0.05);
-        this._update(dt);
-        this.scene.render();
+        const raw = this.engine.getDeltaTime() / 1000;
+        const dt = Math.min(raw, 0.05);
+        const solo = this.solo;
+        (solo || this).quality.update(raw);
+        this.fader.update(dt);
+        const over = () => this.fader.render();
+        if (solo) solo.frame(dt, over);
+        else {
+          this._update(dt);
+          this.scene.render();
+          over();
+        }
       });
-    });
-
-    window.addEventListener("resize", () => {
-      this.engine.resize();
-      this._updateOrtho();
-      this._layoutStem();
+      window.addEventListener("resize", () => {
+        this.engine.resize();
+        this._updateOrtho();
+        this._layoutStem();
+        if (this.solo && this.solo.resize) this.solo.resize();
+      });
     });
   }
 
   _setDifficulty(i) {
     if (this.state !== "title" || !BOT_TIERS[i]) return;
     this.difficulty = i;
-    try {
-      localStorage.setItem(DIFFICULTY_KEY, String(i));
-    } catch (e) {}
+    store.set(DIFFICULTY_KEY, String(i));
     this._renderTitleMenu();
   }
 
@@ -1187,9 +884,7 @@ class Game {
   _applyTilt(on) {
     this.input.tilt = on;
     document.body.classList.toggle("tilt", on);
-    try {
-      localStorage.setItem(TILT_KEY, on ? "1" : "");
-    } catch (e) {}
+    store.set(TILT_KEY, on ? "1" : "");
     this._renderTitleMenu();
   }
 
@@ -1218,7 +913,7 @@ class Game {
     this.crown.setEnabled(true);
     this.clouds.scatter();
     this.clouds.show(true);
-    this.titleScreen.show(true);
+    this.logo.show(true);
     document.body.classList.add("titlescreen");
     document.getElementById("titlemsg").textContent = message || "";
     this._renderTitleMenu();
@@ -1226,44 +921,23 @@ class Game {
     this._updateHUD();
   }
 
+  // Where the logo fits: between the name box and the title's menu, in CSS
+  // pixels down from the canvas's top.
+  _logoBand() {
+    const box = this.engine.getRenderingCanvas().getBoundingClientRect();
+    return { top: 64, bottom: document.getElementById("title").getBoundingClientRect().top - box.top - 16 };
+  }
+
   _hideTitle() {
-    this.titleScreen.show(false);
+    this.logo.show(false);
     document.body.classList.remove("titlescreen");
   }
 
-  // The treetop: a sky-coloured cover over the tree layers whose bottom edge
-  // is the canopy's scalloped arc upside down (highest over the trunk). It
-  // only stands during the title and the fall from it, so the climb in a
-  // round never meets it.
+  // The treetop: where the tree's dome stands during the title and the
+  // fall from it (a round's climb goes on up for ever without it).
   _buildCrown() {
-    const width = 220;
-    const N = Math.round(width * 8) + 2;
-    const positions = [];
-    const indices = [];
-    for (let i = 0; i <= N; i++) {
-      const x = -width / 2 + (i / N) * width;
-      positions.push(x, 400, 0, x, -canopyEdge(x), 0);
-    }
-    for (let i = 0; i < N; i++) {
-      const a = i * 2;
-      indices.push(a, a + 2, a + 1, a + 1, a + 2, a + 3);
-    }
-    const crown = new BABYLON.Mesh("crown", this.scene);
-    const vd = new BABYLON.VertexData();
-    vd.positions = positions;
-    vd.indices = indices;
-    vd.applyToMesh(crown);
-    const mat = new BABYLON.StandardMaterial("crownMat", this.scene);
-    const sky = this.scene.clearColor;
-    mat.emissiveColor = new BABYLON.Color3(sky.r, sky.g, sky.b);
-    mat.disableLighting = true;
-    mat.backFaceCulling = false;
-    crown.material = mat;
-    crown.position.z = 20; // in front of the tree layer (22) and the far canopy (~40)
-    crown.isPickable = false;
-    crown.setEnabled(false);
-    if (TOSS_TREE) crown.isVisible = false; // the test tree has a top of its own
-    this.crown = crown;
+    this.crown = new BABYLON.TransformNode("crown", this.scene);
+    this.crown.setEnabled(false);
   }
 
   // The crown CROWN_SCREENS screens above the top of the lobby's view, and
@@ -1280,8 +954,8 @@ class Game {
   _beginDescent(fromY) {
     this.descent = { t: 0, from: fromY, launchY: fromY };
     document.body.classList.add("falling"); // name labels wait for the landing
-    this.titleScreen.show(true);
-    this.titleScreen.startDrop();
+    this.logo.show(true);
+    this.logo.startFall();
     this.crown.setEnabled(true);
   }
 
@@ -1303,24 +977,20 @@ class Game {
     const to = LOBBY_CAM_Y - this._lobbyDrop("lobby", 0);
     // Your apple is the logo's until it lands.
     const you = this.views[this.humanIdx];
-    if (d.t >= DROP_END) {
+    if (d.t >= FALL_END) {
       this.descent = null;
       document.body.classList.remove("falling");
-      this.titleScreen.show(false);
+      this.logo.show(false);
       this.crown.setEnabled(false);
       this.clouds.show(false);
       if (you) you.mesh.setEnabled(true);
       return to;
     }
     if (you) you.mesh.setEnabled(false);
-    const camAt = (t) => {
-      const f = Math.min(t / DESCENT_TIME, 1);
-      const ease = f < 0.5 ? 4 * f * f * f : 1 - Math.pow(-2 * f + 2, 3) / 2;
-      return d.from + (to - d.from) * ease;
-    };
+    const camAt = (t) => d.from + (to - d.from) * fallEase(t / FALL_TIME);
     const camY = camAt(d.t);
     const viewH = this.camera.orthoTop - this.camera.orthoBottom;
-    this.titleScreen.dropFrame(d.t, dt, camY, camAt(DROP_SHRINK), to, this._landingSpot(), viewH);
+    this.logo.fallFrame(d.t, dt, camY, camAt(FALL_SHRINK), to, this._landingSpot(), viewH);
     return camY;
   }
 
@@ -1340,9 +1010,46 @@ class Game {
     this._beginDescent(fromY);
   }
 
-  // Back to the title (from a lobby, or the end of an offline round).
+  // Apple Toss or Apple Run (`kind`), from the title's button `btn`: built
+  // the first time (the logo idles on meanwhile), then the logo's apple
+  // falls into it as the title's sky fades away.
+  async _playSolo(kind, btn) {
+    if (this.soloLoading) return;
+    this.solos = this.solos || {};
+    if (!this.solos[kind]) {
+      this.soloLoading = true;
+      btn.classList.add("busy");
+      const Mode = kind === "toss" ? Toss : Run;
+      this.solos[kind] = await Mode.create(this.engine, this.engine.getRenderingCanvas());
+      btn.classList.remove("busy");
+      this.soloLoading = false;
+      if (this.state !== "title") return;
+    }
+    const band = this._logoBand();
+    this.fader.from(this.scene, this.camera, [this.logo.root]);
+    this._hideTitle();
+    this.clouds.show(false);
+    this.state = "solo";
+    this.solo = this.solos[kind];
+    document.body.classList.add("solo", `solo-${kind}`);
+    this.solo.enter(band);
+    this._updateBar();
+  }
+
+  // Out of a solo game, back to the title, the game fading away.
+  _leaveSolo() {
+    const solo = this.solo;
+    this.fader.from(solo.scene, solo.camera);
+    solo.leave();
+    this.solo = null;
+    document.body.classList.remove("solo", "solo-toss", "solo-run");
+    this._showTitle();
+  }
+
+  // Back to the title (from a lobby, the end of an offline round, or a solo game).
   _menu() {
-    if (this.online) this._goOffline();
+    if (this.solo) this._leaveSolo();
+    else if (this.online) this._goOffline();
     else if (this.state === "lobby" || this.state === "over") this._showTitle();
   }
 
@@ -1381,25 +1088,6 @@ class Game {
     return drop * (1 - transT * transT * (3 - 2 * transT));
   }
 
-  // Build branches far enough ahead to fill this screen's view (taller on
-  // portrait phones). The layout is the same; it's only revealed further up.
-  // The view above the round's solid top is blurred (#ceiling), fading in
-  // over the last stretch below it: a band along the top of the screen
-  // where the top is the screen's, everything above the line where it's
-  // lower (online on a portrait phone).
-  _updateCeilingBlur() {
-    const el = this.ceilingEl || (this.ceilingEl = document.getElementById("ceiling"));
-    let px = 0;
-    if (this.state === "playing" && this.ceilingY !== undefined) {
-      const cam = this.camera;
-      const perPx = (cam.orthoTop - cam.orthoBottom) / this.engine.getRenderingCanvas().clientHeight;
-      px = Math.round(Math.max(0, (cam.position.y + cam.orthoTop - this.ceilingY) / perPx) + CEILING_FADE_PX);
-    }
-    if (px === this.ceilingPx) return;
-    this.ceilingPx = px;
-    el.style.height = `${px}px`;
-  }
-
   // A local round's solid top: the top of the screen, however tall the view
   // (a portrait phone sees twice as far up). Online it's the server's, the
   // same for everyone.
@@ -1407,22 +1095,14 @@ class Game {
     return Math.max(VIEW_HEIGHT, CAMERA_HALF_HEIGHT + this.camera.orthoTop);
   }
 
+  // Build branches far enough ahead to fill this screen's view (taller on
+  // portrait phones). The layout is the same; it's only revealed further up.
   _fillAhead() {
     return Math.max(VIEW_HEIGHT, CAMERA_HALF_HEIGHT + this.camera.orthoTop) + 6;
   }
 
   async _init() {
     const scene = this.scene;
-    scene.clearColor = new BABYLON.Color4(0.3, 0.47, 0.74, 1); // deeper blue sky
-
-    const hemi = new BABYLON.HemisphericLight(
-      "hemi",
-      new V3(0.2, 1, -0.4),
-      scene,
-    );
-    hemi.intensity = 0.95;
-    const dir = new BABYLON.DirectionalLight("dir", new V3(-0.5, -1, 0.3), scene);
-    dir.intensity = 0.4;
 
     this.camera = new BABYLON.FreeCamera("cam", new V3(0, 0, -18), scene);
     this.camera.setTarget(new V3(0, 0, 0));
@@ -1430,51 +1110,12 @@ class Game {
     this.camera.mode = BABYLON.Camera.ORTHOGRAPHIC_CAMERA;
     this._updateOrtho();
 
-    // Background (screen-locked) and mid tree layer (parallax-scrolled)
-    const bgTex = new BABYLON.Texture(
-      "./assets/appletreebg.webp",
-      scene,
-      false,
-      true,
-      BABYLON.Texture.TRILINEAR_SAMPLINGMODE,
-      () => this._buildBgPlane(bgTex),
-    );
-    this.bgTex = bgTex;
-
-    const treeTex = new BABYLON.Texture(
-      "./assets/appletree.webp",
-      scene,
-      false,
-      true,
-      BABYLON.Texture.TRILINEAR_SAMPLINGMODE,
-      () => this._buildTree(treeTex),
-    );
-    treeTex.hasAlpha = true;
-    this.treeTex = treeTex;
-
-    this.barkMat = createBarkMaterial("bark", scene);
-    // The bark picture on the platforms and the trunk (with the test tree,
-    // its own bark: _buildColumn).
+    // The bark picture on the platforms (the tree's own, once it's loaded:
+    // _buildColumn).
     const bark = new BABYLON.StandardMaterial("barkWood", scene);
     bark.diffuseTexture = new BABYLON.Texture("./assets/bark.png", scene);
     bark.specularColor = BABYLON.Color3.Black();
-    this.branchMats = { platform: bark, trunk: bark };
-    // A trunk of the same bark over the painted tree's (the test tree has
-    // its own), kept round the view (_updateBgScroll). Flattened so it stays
-    // between the treetop's cover and the painted leaves.
-    if (!TOSS_TREE) {
-      const trunk = BABYLON.MeshBuilder.CreateCylinder(
-        "barkTrunk",
-        { height: TRUNK_LEN, diameter: TRUNK_D, tessellation: 16, faceUV: barkSide(TRUNK_LEN, TRUNK_D), cap: BABYLON.Mesh.NO_CAP },
-        scene,
-      );
-      trunk.scaling.z = 0.4;
-      trunk.position.z = TRUNK_Z;
-      trunk.material = this.branchMats.trunk;
-      trunk.isPickable = false;
-      this.barkTrunk = trunk;
-    }
-
+    this.branchMats = { platform: bark };
     // Load the apple once; instantiate per competitor.
     this.appleContainer = await BABYLON.SceneLoader.LoadAssetContainerAsync(
       "./assets/",
@@ -1482,14 +1123,9 @@ class Game {
       scene,
     );
     const titleWords = await BABYLON.SceneLoader.LoadAssetContainerAsync("./assets/", "title.glb", scene);
-    if (TOSS_TREE) await this._buildColumn();
+    await this._buildColumn();
     this._initActionIcon();
-    this.faceTextures = {};
-    for (const name of FACE_NAMES) {
-      const tex = new BABYLON.Texture(`./assets/faces/${name}.png`, scene, false, false);
-      tex.hasAlpha = true;
-      this.faceTextures[name] = tex;
-    }
+    this.faceTextures = loadFaces(scene);
     if (typeof window.AppleSliceBurstEffect === "function") {
       this.sliceBurst = new window.AppleSliceBurstEffect(scene);
       await this.sliceBurst.preload();
@@ -1501,12 +1137,12 @@ class Game {
       for (const v of this.views) v.updateEyes(dt);
       if (this.trophy) this.trophy.update(dt, this.state === "over" && this.youWon);
       if (this.lobbyClouds) this.lobbyClouds.update(dt);
-      this._updateCeilingBlur();
+      this._updateActionIcon();
       this._updateColumn(dt);
       if (this.lobbyGrass) this.lobbyGrass.update(dt, 1.2 + 0.8 * Math.sin(0.3 * this.t)); // a breeze, rising and falling
     });
 
-    this.titleScreen = new TitleScreen(this, titleWords);
+    this.logo = new Logo(scene, this.camera, titleWords, this.appleContainer, this.faceTextures, () => this._logoBand());
     this.trophy = new Trophy(this, titleWords);
     this._buildCrown();
     // Clouds over the treetop (the title, and the fall from it): the view's
@@ -1515,11 +1151,13 @@ class Game {
     // away. And clouds in the lobby's sky, between the grass and the tree's
     // leaves, behind the trunk.
     const sides = () => ({ left: this.camera.position.x + this.camera.orthoLeft, right: this.camera.position.x + this.camera.orthoRight });
-    this.clouds = new Clouds(this, 19, () => {
+    const cloudsAt = (z, band) => new Clouds(scene, { z, band, widths: CLOUD_W, speeds: CLOUD_SPEED, margin: 0.5 });
+    this.clouds = cloudsAt(19, () => {
       const bottom = this.crown.position.y;
       return { ...sides(), bottom, top: bottom + 1 + this.camera.orthoTop - this.camera.orthoBottom };
     });
-    this.lobbyClouds = new Clouds(this, 130, () => ({ ...sides(), bottom: LOBBY_GROUND_Y, top: LOBBY_SKY_TOP }));
+    this.clouds.show(false);
+    this.lobbyClouds = cloudsAt(130, () => ({ ...sides(), bottom: LOBBY_GROUND_Y, top: LOBBY_SKY_TOP }));
     this.lobbyClouds.show(true);
     this.lobbyClouds.scatter();
     this._showTitle();
@@ -1616,25 +1254,6 @@ class Game {
     this.lobbyGrass = new Grass(scene, blades);
     this.lobbyGrass.mesh.renderingGroupId = 2;
 
-    // Tree trunk bridging the tree down to the ground. Placed behind the green
-    // ground AND both background layers (z past them), so it only shows through
-    // the sky gap — occluded by the ground at the base and by the tree bg above.
-    // Diameter matches the painted trunk in the tree layer (99 of 1080 px on
-    // the 20-wide world-tree = 1.83). Both are world-space under an ortho
-    // camera, so the match holds on any aspect ratio (mobile or desktop).
-    // Built once and kept (not under lobbyRoot), so it stays up through rounds.
-    if (!this.trunk && !TOSS_TREE) {
-      const trunk = BABYLON.MeshBuilder.CreateCylinder(
-        "trunk",
-        { height: 70, diameter: 1.83, tessellation: 16 },
-        scene,
-      );
-      // Its own bark material (same colour) — NOT the shared branch barkMat.
-      trunk.material = createBarkMaterial("trunkMat", scene);
-      trunk.position.set(0, -18, 41);
-      trunk.isPickable = false;
-      this.trunk = trunk;
-    }
   }
 
   _disposeLobby() {
@@ -1668,7 +1287,7 @@ class Game {
     if (this.state === "title") {
       this._placeCrown(); // the view's size may have changed
       this.clouds.update(dt);
-      this.titleScreen.update(dt);
+      this.logo.update(dt);
       return;
     }
     const fallY = this._advanceDescent(dt);
@@ -2068,91 +1687,65 @@ class Game {
 
   // ── UI ───────────────────────────────────────────────────────────
 
-  // The touch bar's action button: your apple model (minus face and eyes),
-  // rendered on its own small canvas and squashed/stretched with you. Only
-  // built when the touch bar is showing.
+  // The touch bar's art: your apple's left and right leaves (the ◀ ▶
+  // buttons), its stem standing between them, and the whole apple minus
+  // face and eyes (the action button), each rendered once into an image on a
+  // small engine of its own, which then goes. They're photographed in a
+  // fixed pose (the idle clip's first frame), so every load gets the same
+  // pictures. The action button's apple squashes, stretches and idles in 2D
+  // (_updateActionIcon). Only made when the touch bar is showing.
   async _initActionIcon() {
     const canvas = document.getElementById("actionCanvas");
     if (!canvas || !document.getElementById("touch").offsetHeight) return;
     const engine = new BABYLON.Engine(canvas, true, { alpha: true, premultipliedAlpha: false });
     const scene = new BABYLON.Scene(engine);
     scene.clearColor = new BABYLON.Color4(0, 0, 0, 0);
-    const hemi = new BABYLON.HemisphericLight("hemi", new V3(0.2, 1, -0.4), scene);
-    hemi.intensity = 0.95;
-    const dir = new BABYLON.DirectionalLight("dir", new V3(-0.5, -1, 0.3), scene);
-    dir.intensity = 0.4;
-    // The model stands 2.54 tall (feet to leaf tips) and 1.78 wide; a full
-    // jump stretch (plus spring overshoot) reaches ~3.5 tall.
-    // Feet (the model's origin) on the bottom edge, so the apple sits flush
-    // with the bottom of the screen.
-    const cam = new BABYLON.FreeCamera("iconCam", new V3(0, 0, -18), scene);
-    cam.setTarget(new V3(0, 0, 0));
-    cam.mode = BABYLON.Camera.ORTHOGRAPHIC_CAMERA;
-    const fit = () => {
-      engine.resize();
-      const aspect = engine.getAspectRatio(cam);
-      // Room for the tallest stretch and a stomp squash (1.6× wider + wobble).
-      const halfH = Math.max(1.85, 1.6 / aspect);
-      cam.orthoTop = 2 * halfH - 0.03;
-      cam.orthoBottom = -0.03;
-      cam.orthoLeft = -halfH * aspect;
-      cam.orthoRight = halfH * aspect;
-    };
-    fit();
-    window.addEventListener("resize", fit);
+    addLights(scene);
+    new BABYLON.FreeCamera("iconCam", new V3(0, 0, -18), scene).setTarget(new V3(0, 0, 0));
 
     const container = await BABYLON.SceneLoader.LoadAssetContainerAsync("./assets/", "apple.glb", scene);
     const inst = container.instantiateModelsToScene((n) => `icon_${n}`, false);
-    const squash = new BABYLON.TransformNode("iconSquash", scene);
-    inst.rootNodes[0].parent = squash;
-    for (const m of inst.rootNodes[0].getChildMeshes(false)) {
-      if (/face|eyeball/.test(m.name)) m.setEnabled(false);
-    }
+    const parts = inst.rootNodes[0].getChildMeshes(false);
+    for (const m of parts) if (/face|eyeball/.test(m.name)) m.setEnabled(false);
     const idle = inst.animationGroups.find((g) => g.name.toLowerCase().includes("idle"));
     for (const g of inst.animationGroups) g.stop();
     if (idle) {
-      idle.speedRatio = 2;
       idle.start(true);
+      idle.goToFrame(idle.from);
+      idle.pause();
     }
-
-    scene.onBeforeRenderObservable.add(() => {
-      const you = this.views[this.humanIdx];
-      if (this.leafShots) squash.scaling.set(1, 1, 1); // hold still for the leaf pictures
-      else if (you && you.core.alive && you.squashNode) squash.scaling.copyFrom(you.squashNode.scaling);
-      else squash.scaling.set(1, 1, 1);
-    });
-    engine.runRenderLoop(() => scene.render());
-
-    // The ◀ ▶ buttons are the apple's own left and right leaves, with its
-    // stem standing between them, rendered once into images. They're
-    // photographed in a fixed pose (idle clip paused on its first frame, no
-    // squash), so every load gets the same pictures; the idle carries on after.
-    const parts = inst.rootNodes[0].getChildMeshes(false);
     const leaves = parts.find((m) => /leaves/.test(m.name));
     const stem = parts.find((m) => /stem/.test(m.name));
-    if (leaves) {
-      this.leafShots = true;
-      if (idle) {
-        idle.goToFrame(idle.from);
-        idle.pause();
-      }
-      let frames = 0;
-      const obs = scene.onAfterRenderObservable.add(() => {
-        if (++frames < 3) return; // the frozen pose is drawn (bones updated)
-        scene.onAfterRenderObservable.remove(obs);
-        this._renderTouchArt(engine, scene, leaves, stem, () => {
-          this.leafShots = false;
-          if (idle) idle.play(true);
-        });
+    const body = parts.filter((m) => m.isEnabled() && m.getTotalVertices() > 0);
+    engine.runRenderLoop(() => scene.render());
+    let frames = 0;
+    const obs = scene.onAfterRenderObservable.add(() => {
+      if (++frames < 3) return; // the frozen pose is drawn (bones updated)
+      scene.onAfterRenderObservable.remove(obs);
+      this._renderTouchArt(engine, scene, leaves, stem, body, () => {
+        engine.dispose();
+        canvas.remove();
       });
-    }
+    });
+  }
+
+  // The action button's apple (a picture) squashed and stretched with
+  // yours, bobbing gently all the while as the 3D one idles.
+  _updateActionIcon() {
+    const img = this.actionApple;
+    if (!img) return;
+    const you = this.views[this.humanIdx];
+    const sq = you && you.core.alive && you.squashNode ? you.squashNode.scaling : null;
+    const bob = Math.sin(this.t * 2 * Math.PI * 1.2);
+    const tf = `scale(${((sq ? sq.x : 1) * (1 - 0.025 * bob)).toFixed(3)}, ${((sq ? sq.y : 1) * (1 + 0.035 * bob)).toFixed(3)})`;
+    if (tf !== this.actionTf) img.style.transform = this.actionTf = tf;
   }
 
   // Render each leaf on its own into a transparent image (a copy of the
   // leaves mesh keeping only the triangles on that side of the stem), then
   // the stem, each framed by a tight orthographic camera. One at a time
   // (Babylon takes one screenshot at a time).
-  _renderTouchArt(engine, scene, leaves, stem, done) {
+  _renderTouchArt(engine, scene, leaves, stem, body, done) {
     leaves.refreshBoundingInfo(true);
     const mid = leaves.getBoundingInfo().boundingBox.centerWorld.x;
     // A mesh's triangles in world space, as drawn: skinned into the current
@@ -2190,13 +1783,15 @@ class Game {
       const { min, max } = bounds(tris);
       const pad = 0.12 * (max.x - min.x);
       // Next to no margin below, so the leaf can sit on the bottom edge.
-      return { key: left ? "ArrowLeft" : "ArrowRight", m, min, max, pad, padBottom: 0.01, own: true };
+      return { key: left ? "ArrowLeft" : "ArrowRight", meshes: [m], min, max, pad, padBottom: 0.01, own: true };
     };
     const shots = [leaf(true), leaf(false)];
     if (stem) {
       const { min, max } = bounds(triangles(stem));
-      shots.push({ key: "stem", m: stem, min, max, pad: 0.01, padBottom: 0.01 });
+      shots.push({ key: "stem", meshes: [stem], min, max, pad: 0.01, padBottom: 0.01 });
     }
+    const { min, max } = bounds(body.flatMap(triangles));
+    shots.push({ key: "apple", meshes: body, min, max, pad: 0.01, padBottom: 0.01 });
     let tries = 0;
     const shoot = () => {
       if (!shots.length) {
@@ -2204,7 +1799,7 @@ class Game {
         return done();
       }
       const shot = shots[0];
-      const { m: mesh, min, max, pad, padBottom } = shot;
+      const { meshes, min, max, pad, padBottom } = shot;
       const cx = (min.x + max.x) / 2;
       const cy = (min.y + max.y) / 2;
       const hw = (max.x - min.x) / 2 + pad;
@@ -2219,7 +1814,7 @@ class Game {
       cam.orthoBottom = bottom - cy;
       const h = 256;
       const size = { width: Math.max(8, Math.round((h * 2 * hw) / (top - bottom))), height: h };
-      mesh.setEnabled(true);
+      for (const m of meshes) m.setEnabled(true);
       BABYLON.Tools.CreateScreenshotUsingRenderTarget(
         engine, cam, size,
         (data) => {
@@ -2232,20 +1827,23 @@ class Game {
           }
           if (shot.key === "stem") {
             this.stemArt = { url: data, width: 2 * hw, top };
+          } else if (shot.key === "apple") {
+            this.actionApple = document.getElementById("actionApple");
+            this.actionApple.src = data;
           } else {
             const btn = document.querySelector(`#touch [data-code="${shot.key}"]`);
             if (btn) btn.innerHTML = `<span class="leaf" style="background-image: url(${data})"></span>`;
             // For the stem: a leaf picture's size and the leaf's middle, in world units.
             this.leafArt = { width: 2 * hw, height: top - bottom, bottom, cy };
           }
-          if (shot.own) mesh.dispose();
+          if (shot.own) meshes[0].dispose();
           shots.shift();
           tries = 0;
           shoot();
         },
         "image/png", 4, true, undefined, false, false, false, 1,
         (tex) => {
-          tex.renderList = [mesh];
+          tex.renderList = meshes;
         },
       );
     };
@@ -2280,9 +1878,7 @@ class Game {
 
   _setPlayerName(raw) {
     this.playerName = raw.trim().slice(0, 16);
-    try {
-      localStorage.setItem(NAME_KEY, this.playerName);
-    } catch (e) {}
+    store.set(NAME_KEY, this.playerName);
     // Online, tell the server once typing pauses.
     clearTimeout(this.renameTimer);
     this.renameTimer = setTimeout(() => {
@@ -2354,7 +1950,7 @@ class Game {
   _updateBar() {
     let html = "";
     const o = this.online;
-    const menu = o ? this.state === "lobby" || !o.mirror : this.state === "lobby" || this.state === "over";
+    const menu = !!this.solo || (o ? this.state === "lobby" || !o.mirror : this.state === "lobby" || this.state === "over");
     if (this.menuBtn.hidden === menu) this.menuBtn.hidden = !menu;
     if (o && o.mirror && this.state === "lobby" && o.humans === 1) html += `<span data-act="go" class="on">Start now</span>`;
     if (html !== this.barHtml) {
@@ -2370,134 +1966,7 @@ class Game {
     this.banner.style.display = text ? "block" : "none";
   }
 
-  // ── Background layers ────────────────────────────────────────────
-
-  // A tall textured mesh whose BOTTOM edge is jagged (leafy) instead of a flat
-  // cut. UVs tile the texture in world space so it looks undistorted; the jag
-  // just clips the bottom into a scalloped arc (see canopyEdge).
-  _buildJaggedBg(name, width, uTiles, vTiles, z, bottomY = BG_BOTTOM_Y, topY = BG_TOP_Y, uOffset = 0) {
-    const N = Math.round(width * 8) + 2; // columns — fine enough for round scallops
-    const H = topY - bottomY;
-    const positions = [];
-    const uvs = [];
-    const indices = [];
-    for (let i = 0; i <= N; i++) {
-      const fx = i / N;
-      const x = -width / 2 + fx * width;
-      const jag = canopyEdge(x);
-      const by = bottomY + jag;
-      positions.push(x, topY, 0);
-      uvs.push(uOffset + fx * uTiles, vTiles);
-      positions.push(x, by, 0);
-      uvs.push(uOffset + fx * uTiles, ((by - bottomY) / H) * vTiles);
-    }
-    for (let i = 0; i < N; i++) {
-      const a = i * 2;
-      const b = i * 2 + 1;
-      const c = (i + 1) * 2;
-      const d = (i + 1) * 2 + 1;
-      indices.push(a, c, b, b, c, d);
-    }
-    const mesh = new BABYLON.Mesh(name, this.scene);
-    const vd = new BABYLON.VertexData();
-    vd.positions = positions;
-    vd.indices = indices;
-    vd.uvs = uvs;
-    const normals = [];
-    BABYLON.VertexData.ComputeNormals(positions, indices, normals);
-    vd.normals = normals;
-    vd.applyToMesh(mesh);
-    mesh.position.z = z;
-    mesh.isPickable = false;
-    return mesh;
-  }
-
-  // Far leafy background — a tall WORLD-SPACE mesh with a jagged (leafy) bottom.
-  // On load only its bottom shows at the top of the screen; scrolling the
-  // camera up reveals it until it fills the view.
-  _buildBgPlane(tex) {
-    if (TOSS_TREE) return;
-    for (const p of this.bgPlanes || []) p.dispose();
-    if (this.bgMat) this.bgMat.dispose();
-
-    const width = 220;
-    const TILE = 58; // world units per texture tile (keeps the leaf scale)
-    // The leaf image doesn't tile seamlessly, so instead of one tall plane the
-    // canopy is a stack of overlapping bands, each one image tall and starting
-    // at the image's bottom row. Each band's scalloped-arc bottom (canopyEdge)
-    // hangs over the band below, so every seam is a canopy edge. BAND_STEP
-    // keeps each band's top above the next band's highest edge point.
-    const BAND_STEP = 30;
-    // Center a tile on the trunk: side seams land at x = ±TILE/2, off-screen
-    // on typical widescreens.
-    const uOffset = (TILE / 2 - width / 2) / TILE;
-
-    tex.wrapU = BABYLON.Texture.WRAP_ADDRESSMODE;
-    tex.wrapV = BABYLON.Texture.WRAP_ADDRESSMODE;
-    tex.uScale = 1;
-    tex.vScale = 1;
-    // The texture is very dark (max ~0.19). Lighting/emissive clamp at 1 and
-    // multiply by the texture, so only level (scales the sample) brightens it.
-    tex.level = 2;
-
-    const bgMat = new BABYLON.StandardMaterial("bgMat", this.scene);
-    bgMat.diffuseTexture = tex;
-    bgMat.emissiveTexture = tex;
-    bgMat.emissiveColor = new BABYLON.Color3(1.05, 1.05, 1.05);
-    bgMat.disableLighting = true;
-    bgMat.backFaceCulling = false;
-    // All bands hang off one node that hops up by whole BAND_STEPs as the
-    // camera climbs (_updateBgScroll), so the canopy never runs out.
-    if (!this.bgRoot) this.bgRoot = new BABYLON.TransformNode("bgRoot", this.scene);
-    this.bgStep = BAND_STEP;
-    this.bgPlanes = [];
-    for (let k = 0; BG_BOTTOM_Y + k * BAND_STEP < BG_TOP_Y; k++) {
-      const bottom = BG_BOTTOM_Y + k * BAND_STEP;
-      // Higher bands sit slightly nearer the camera, over the band below.
-      const band = this._buildJaggedBg(
-        `bg${k}`, width, width / TILE, 1, 40 - 0.05 * k, bottom, bottom + TILE, uOffset,
-      );
-      band.material = bgMat;
-      band.parent = this.bgRoot;
-      this.bgPlanes.push(band);
-    }
-    this.bgMat = bgMat;
-  }
-
-  // Mid tree layer (trunk + closer leaves) — world-space, tall, jagged bottom,
-  // a narrow central strip in front of the far background.
-  _buildTree(tex) {
-    if (TOSS_TREE) return;
-    if (this.treePlane) this.treePlane.dispose();
-    if (this.treeMat) this.treeMat.dispose();
-
-    const sz = tex.getSize();
-    const imgAspect = sz.width && sz.height ? sz.width / sz.height : 1;
-    const width = 20;
-    const tileHeight = width / imgAspect;
-    const height = BG_TOP_Y - BG_BOTTOM_Y;
-
-    tex.wrapU = BABYLON.Texture.CLAMP_ADDRESSMODE;
-    tex.wrapV = BABYLON.Texture.WRAP_ADDRESSMODE;
-    tex.uScale = 1;
-    tex.vScale = 1;
-
-    const plane = this._buildJaggedBg("tree", width, 1, height / tileHeight, 22);
-    const mat = new BABYLON.StandardMaterial("treeMat", this.scene);
-    mat.diffuseTexture = tex;
-    mat.opacityTexture = tex;
-    mat.emissiveTexture = tex;
-    mat.emissiveColor = new BABYLON.Color3(0.6, 0.6, 0.6);
-    mat.specularColor = BABYLON.Color3.Black();
-    mat.backFaceCulling = false;
-    mat.transparencyMode = BABYLON.Material.MATERIAL_ALPHABLEND;
-    plane.material = mat;
-    this.treePlane = plane;
-    this.treeMat = mat;
-    this.treeStep = tileHeight; // the trunk texture repeats every tile
-  }
-
-  // The test tree (TOSS_TREE): its foot standing on the lobby's ground, and
+  // The tree: its foot standing on the lobby's ground, and
   // copies of its repeating piece, kept round the view by _updateBgScroll.
   async _buildColumn() {
     const scene = this.scene;
@@ -2538,7 +2007,8 @@ class Game {
       if (!m.material) continue;
       if (!this.columnFrontMats.has(m.material)) {
         const mat = m.material.clone(`${m.material.name}_front`);
-        mat.needDepthPrePass = true; // fades as one skin, not leaf through leaf
+        mat.needDepthPrePass = false; // on while it fades (_updateColumn): then it fades as one skin, not leaf through leaf
+        mat.forceDepthWrite = true; // whole, it's drawn once, nearest leaves in front
         mat.transparencyMode = BABYLON.Material.MATERIAL_ALPHABLEND;
         this.columnFrontMats.set(m.material, mat);
       }
@@ -2546,6 +2016,10 @@ class Game {
       m.renderingGroupId = 1; // over the branches, trunk and far half, under the apples
     }
     this.columnOpen = 0; // 0 whole … 1 the near half gone
+    // The inside's leaves, not drawn while the near half covers them (its
+    // dark skin, trunk and apples stay: they show through the near leaves).
+    this.columnBack = root.getChildMeshes(false).filter((m) => m.material && /leaf/.test(m.material.name));
+    for (const m of this.columnBack) m.setEnabled(false);
 
     // The platforms are its trunk's wood.
     this.branchMats.platform = c.materials.find((m) => /bark/.test(m.name)) || this.branchMats.platform;
@@ -2553,11 +2027,12 @@ class Game {
     // Inside, the leaves darken with how deep into the tree they are (how
     // far behind the cut), to none at its edges.
     for (const m of c.materials) new ColumnDepth(m, this);
+    // Readied now, while hidden, so a round's start doesn't stall on it.
+    for (const m of this.columnBack) m.material.forceCompilation(m);
 
     // The pieces of each half: the wall's repeats, and the treetop (seen on
     // the fall from the title: a dome the shape of the canopy's rounded
-    // bottom, standing on the last whole piece of wall under where the
-    // painted tree's scalloped top would be, which the test does without).
+    // bottom, standing on the last whole piece of wall under the crown).
     this.columnHalves = [[root, "column"], [frontRoot, "column_front"]].map(([r, name]) => ({
       tiles: parts(r, `${name}_tile`),
       top: parts(r, `${name}_top`)[0],
@@ -2574,23 +2049,17 @@ class Game {
     if (this.columnOpen === to) return;
     this.columnOpen = Math.max(0, Math.min(1, this.columnOpen + ((to ? 1 : -1) * dt) / COLUMN_OPEN_TIME));
     this.columnFront.setEnabled(this.columnOpen < 1);
-    for (const mat of this.columnFrontMats.values()) mat.alpha = 1 - this.columnOpen;
+    for (const m of this.columnBack) m.setEnabled(this.columnOpen > 0);
+    for (const mat of this.columnFrontMats.values()) {
+      mat.alpha = 1 - this.columnOpen;
+      mat.needDepthPrePass = this.columnOpen > 0; // whole, it needn't be drawn twice
+    }
   }
 
-  // Hop the background layers up by whole repeats so the stretch below the
-  // view always starts under the camera: the picture is unchanged, but it
-  // never ends. 12 clears the tallest canopy-edge rise at the screen sides.
+  // Hop the tree's repeats up by whole pieces so the stretch below the view
+  // always starts under the camera: the picture is unchanged, but it never
+  // ends.
   _updateBgScroll() {
-    const below = this.camera.position.y + this.camera.orthoBottom - BG_BOTTOM_Y - 12;
-    if (this.bgRoot) this.bgRoot.position.y = Math.max(0, Math.floor(below / this.bgStep)) * this.bgStep;
-    if (this.treePlane) {
-      this.treePlane.position.y = Math.max(0, Math.floor(below / this.treeStep)) * this.treeStep;
-    }
-    if (this.barkTrunk) {
-      const R = BARK_TILE; // hops by whole pictures
-      const k = Math.max(0, Math.floor((this.camera.position.y + this.camera.orthoBottom - LOBBY_GROUND_Y) / R) - 1);
-      this.barkTrunk.position.y = LOBBY_GROUND_Y + k * R + TRUNK_LEN / 2;
-    }
     if (this.columnHalves) {
       // Wide enough for the view, whatever its shape, with room to spare.
       const scale = Math.max(COLUMN_SCALE_MIN, (this.camera.orthoRight + 3) / COLUMN_R);
@@ -2614,7 +2083,7 @@ class Game {
   }
 }
 
-// The test tree's leaves, darker the deeper into the tree they are: added
+// The tree's leaves, darker the deeper into the tree they are: added
 // to its materials' shaders (the far half's; the near half's are copies made
 // before this is).
 class ColumnDepth extends BABYLON.MaterialPluginBase {

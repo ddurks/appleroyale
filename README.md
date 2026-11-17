@@ -15,6 +15,42 @@ The page loads the engine (Babylon.js and its loaders) from
 `node_modules`, and `./deploy.sh` uploads those files compressed. To move to
 the newest engine: `npm update`, try the game, deploy.
 
+The tree models (`tosstree.glb`, `tosstree_inside.glb`, `treecolumn.glb`)
+are Draco-compressed (Blender's glTF export, Draco on); Babylon fetches the
+Draco decoder from its own CDN the first time one loads.
+
+All three games watch their frame rate (`Quality` in `common.js`): when it stays under
+40 a second for a couple of seconds they step down, one step at a time and
+never back up: Apple Toss thins its grass, then draws fewer pixels (2/3 of
+them across), then thins the grass again; Royale and Apple Run draw fewer
+pixels. A phone capping the frame rate at 30 (iPhone Low Power Mode) steps
+down too.
+
+## Code
+
+One page, `index.html`, with one engine and one title. `royale.js` is Apple
+Royale, the main game (with `core.js`, `net.js`, `bots.js`), and owns the
+page: the title, the render loop, and the switch into and out of the solo
+games, `toss.js` (`Toss`) and `run.js` (`Run`). Each solo game is a scene
+of its own, built on the page's engine the first time it's chosen, and only
+drawn while it's being played. (`toss.html` and `run.html` just send you to
+the title.) What they share:
+
+- `common.js`: the engine and scene set up and lit alike, the render loop,
+  plain materials, the blob shadow, faces, a new apple dropping in,
+  clouds, `Quality`, `store` (localStorage that never throws). Its header
+  lists its globals.
+- `logo.js`: the logo (the 3D "apple royale" over an idling apple) and the
+  apple's fall from it. The title's logo sends its apple into every game:
+  into Royale the camera falls from the sky down the tree to the lobby;
+  into Toss or Run the title's picture fades away (`Fader` in `common.js`)
+  while their camera tips down from the sky (or the leaves overhead), the
+  logo drawn over them where it was (`Intro`), the apple riding down and
+  landing on the stump or the branch. **Menu** fades a solo game back out
+  over the title.
+- `common.css`: the font, the page pinned to the screen, the red **Menu**
+  button and the choice pills. `grass.js` and `sliceBurst.js` as before.
+
 ## Royale
 
 10 apples, 1 you + 9 bots. The screen scrolls up, faster as the round
@@ -42,7 +78,12 @@ goes on — stay in frame to stay alive. The top of the screen is a ceiling
   top of the green and no higher, with a row behind them standing on the
   green two thirds of the way up them, and clouds drifting through the
   sky under the tree.
-- The platforms are bark-textured and bright (`RoyaleBranch`).
+- The tree is the Apple Toss tree opened down its middle
+  (`assets/treecolumn.glb`, the **RoyaleColumn** scene in
+  `appletree.blend`): whole on the title and in the lobby, its near half
+  fading away as a round begins to show the inside, whose leaves darken
+  the deeper in they are. Its leafy wall repeats on up for ever.
+- The platforms are the tree's bark (`RoyaleBranch`).
 - **Menu** is the red button at the top left (on Apple Toss and Apple Run
   too).
 - Win and you get the trophy in the middle of the screen, in place of any
@@ -51,15 +92,15 @@ goes on — stay in frame to stay alive. The top of the screen is a ceiling
   (`Trophy` in `royale.js`).
 - In a local game the solid top is the top of your screen, however tall
   (the core's `ceiling` option); online it's the server's, the same height
-  for everyone, which on a portrait phone is about half-way up. The view
-  above the top is blurred, fading in just under it.
+  for everyone, which on a portrait phone is about half-way up.
 - Faces react: grimace when stomped, yell while pounding, frown near the
   bottom of the screen, "o" while rising, grin near the top.
 - The rules live in `core.js` (no graphics; fixed 1/60 s steps), shared by
   the game, the bot lab and the multiplayer server. `royale.js` feeds it
   inputs and draws it.
-- The title screen: **Local** (vs bots; **Enter**) or **Online** (**O**),
-  bot difficulty **Easy / Normal / Hard** (keys **1–3**) and, on touch
+- The title screen: Royale's **Local** (vs bots; **Enter**) or **Online**
+  (vs players; **O**), then the two solo games, local only, as plainer
+  buttons (**Apple Toss**, **Apple Run**; the first time, they load). Bot difficulty **Easy / Normal / Hard** (keys **1–3**) and, on touch
   screens, controls **Buttons / Tilt**; both remembered. **Menu** (or
   **Esc**) in a lobby goes back. The 3D title is `assets/title.glb`, built
   from the font by `tools/title_glb.py` (see its header). The bots run
@@ -67,7 +108,7 @@ goes on — stay in frame to stay alive. The top of the screen is a ceiling
 
 ## Apple Toss
 
-`toss.html` (**Apple Toss** on the title screen): flick the apple into the
+`toss.js` (**Apple Toss** on the title screen): flick the apple into the
 bucket under the tree, Paper Toss style. Only the flick's direction counts;
 the wind (the arrow and number, and the loose leaves) pushes the apple
 sideways in flight, so aim into it. Buckets in a row are the score; a miss
@@ -77,12 +118,15 @@ sweeping outlines round its axis, and the apple collides with those same
 outlines, so what it hits is exactly what you see. The apple is a rigid
 body whose hull is its own vertices in the pose it was thrown in: it can
 glance off the rim, bounce in or out, and only counts once it comes to rest
-inside. Each apple drops onto the stump stretched and squashes as it lands.
+inside. It opens on the logo, the apple falling from it onto the stump
+(`logo.js` Intro); each apple after drops onto the stump stretched and
+squashes as it lands.
 A miss bursts into slices where it hits the ground; they fall back into
 the grass and are gone.
 The grass is single blades bent by the wind in a shader (`grass.js`, also
-the Royale lobby's grass).
-The apple waits on a stump among four trees, under the title screen's
+the Royale lobby's grass); far blades are drawn in fewer pieces.
+The apple waits on a stump among four trees (the nearer two always kept
+clear of the throw's way, so on a phone only their edges show), under the title screen's
 clouds. The tree (`assets/tosstree.glb`: a simple trunk under a ball of
 shingled leaves, as one mesh with lighter leaves), the stump
 (`assets/stump.glb`) and the loose leaf (`assets/leaf.glb`) come from the
@@ -93,11 +137,13 @@ midrib and fainter ones along the veins) so their shape shows under plain
 lighting. The trees are exported with each leaf decimated to 70 vertices
 (`Cube.005_lo`, `Cube.100_lo`), joined into one mesh and raised so the
 trunk's foot is at 0; `tosstree_inside.glb` is the same without the ball
-and trunk and with the leaves turned in.
+and trunk and with the leaves turned in. Each tree skips the leaves round
+its back, hidden from the camera by its dark ball. `leaf.glb` is the same
+light leaf (`Cube.005_lo`), so every tree in the game has the same leaves.
 
 ## Apple Run
 
-`run.html` (**Apple Run** on the title screen): roll along the tree's
+`run.js` (**Apple Run** on the title screen): roll along the tree's
 branches, Temple Run style. The apple rolls on by itself, faster and faster,
 along straights laid out at random that end in a corner. Swipe left / right
 to take a corner, up to jump a gap, down to duck a leafy bough (arrow keys
@@ -119,7 +165,8 @@ from inside (`assets/tosstree_inside.glb`: no solid ball or trunk, each
 leaf mirrored through the canopy so its face turns in, tip still hanging)
 seen from the middle of its canopy, drawn once into a cube when the page
 loads: sky through the gaps above, grass far below. The wood and
-leaves fade into it with distance, sooner the deeper they are. Each apple drops onto the
+leaves fade into it with distance, sooner the deeper they are. It opens on the logo, the apple falling from
+it onto the branch (`logo.js` Intro); each apple after drops onto the
 branch stretched and squashes as it lands.
 
 ## Online

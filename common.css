@@ -1,0 +1,83 @@
+/* What the three pages share (index.html, toss.html, run.html): the font,
+   a page pinned to the screen, the game's canvas, the red Menu button and
+   the choice pills (a row of radio buttons). */
+
+@font-face {
+  font-family: "DrawvidHand";
+  src: url("assets/fonts/DrawvidHandwriting.woff2") format("woff2");
+  font-display: swap;
+}
+html,
+body {
+  font-family: "DrawvidHand", "Comic Sans MS", cursive, sans-serif;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+}
+body {
+  /* Pinned to the visible screen edges (on iOS Safari 100% / 100vh run on
+     under the toolbar), and never scrolled (iOS scrolls the page to show a
+     focused input). */
+  position: fixed;
+  inset: 0;
+  background: #4d78bd; /* the sky, until the game draws */
+  /* No long-press text selection, callout menu or tap flash (iOS/Android). */
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
+}
+#renderCanvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  touch-action: none;
+  outline: none;
+}
+
+/* Menu, at the top left: back to the title. */
+.menu-button {
+  font: inherit;
+  font-size: clamp(17px, 4.6vw, 21px);
+  color: #fff;
+  text-decoration: none;
+  background: #d8262b;
+  border: 3px solid #2a1208;
+  border-radius: 12px;
+  padding: 4px 14px 2px;
+  box-shadow: 0 4px 0 #2a1208;
+  text-shadow: 0 2px 0 rgba(0, 0, 0, 0.35);
+  cursor: pointer;
+}
+.menu-button[hidden] {
+  display: none;
+}
+.menu-button:active {
+  transform: translateY(3px);
+  box-shadow: 0 1px 0 #2a1208;
+}
+
+/* One choice of a few: the chosen one white. */
+.radio {
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  border-radius: 12px;
+  background: rgba(0, 0, 0, 0.4);
+}
+.radio button {
+  flex: 1;
+  font: inherit;
+  font-size: clamp(17px, 4.6vw, 21px);
+  color: rgba(255, 255, 255, 0.75);
+  background: none;
+  border: 0;
+  border-radius: 8px;
+  padding: 6px 0 4px;
+  cursor: pointer;
+}
+.radio button[aria-checked="true"] {
+  color: #2a1208;
+  background: #fff;
+  text-shadow: none;
+}

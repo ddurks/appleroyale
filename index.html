@@ -7,43 +7,8 @@
     <title>apple royale</title>
     <link rel="icon" type="image/png" href="assets/favicon.png" />
     <link rel="apple-touch-icon" href="assets/apple-touch-icon.png" />
+    <link rel="stylesheet" href="common.css" />
     <style>
-      @font-face {
-        font-family: "DrawvidHand";
-        src: url("assets/fonts/DrawvidHandwriting.woff2") format("woff2");
-        font-display: swap;
-      }
-      html,
-      body {
-        font-family: "DrawvidHand", "Comic Sans MS", cursive, sans-serif;
-        margin: 0;
-        padding: 0;
-        overflow: hidden;
-        width: 100%;
-        height: 100%;
-      }
-      body {
-        /* Pinned to the visible screen edges (no explicit height: on iOS
-           Safari 100% / 100vh run on under the toolbar), and never scrolled
-           (iOS scrolls the page to show a focused input). */
-        position: fixed;
-        inset: 0;
-        width: auto;
-        height: auto;
-        background: url("./assets/appletreebg.png") center/cover no-repeat #000;
-        /* No long-press text selection, callout menu or tap flash (iOS/Android). */
-        -webkit-user-select: none;
-        user-select: none;
-        -webkit-touch-callout: none;
-        -webkit-tap-highlight-color: transparent;
-      }
-      #renderCanvas {
-        display: block;
-        width: 100%;
-        height: 100%;
-        touch-action: none;
-        outline: none;
-      }
       /* Top left: the Menu button (red, as the title's buttons), then the
          game status, one short line. */
       #topleft {
@@ -53,26 +18,6 @@
         display: flex;
         align-items: center;
         gap: 12px;
-      }
-      #menuBtn {
-        font: inherit;
-        font-size: clamp(17px, 4.6vw, 21px);
-        color: #fff;
-        text-decoration: none;
-        background: #d8262b;
-        border: 3px solid #2a1208;
-        border-radius: 12px;
-        padding: 4px 14px 2px;
-        box-shadow: 0 4px 0 #2a1208;
-        text-shadow: 0 2px 0 rgba(0, 0, 0, 0.35);
-        cursor: pointer;
-      }
-      #menuBtn[hidden] {
-        display: none;
-      }
-      #menuBtn:active {
-        transform: translateY(3px);
-        box-shadow: 0 1px 0 #2a1208;
       }
       #hud {
         color: #fff;
@@ -172,20 +117,6 @@
         background: rgba(0, 0, 0, 0.65);
         font-weight: 700;
       }
-      /* A blur over the view above the round's solid top (sized by
-         royale.js), fading in over its last 44px. */
-      #ceiling {
-        position: absolute;
-        top: 0;
-        left: 0;
-        right: 0;
-        height: 0;
-        pointer-events: none;
-        -webkit-backdrop-filter: blur(7px);
-        backdrop-filter: blur(7px);
-        -webkit-mask-image: linear-gradient(to top, transparent, #000 44px);
-        mask-image: linear-gradient(to top, transparent, #000 44px);
-      }
       #banner {
         position: absolute;
         top: 36%;
@@ -253,38 +184,108 @@
         transform: translateY(4px);
         box-shadow: 0 1px 0 #2a1208;
       }
-      #title .radio {
-        display: flex;
-        gap: 4px;
-        padding: 4px;
-        border-radius: 12px;
-        background: rgba(0, 0, 0, 0.4);
+      #title .play small,
+      #title .solo small {
+        display: block;
+        font-size: 0.5em;
+        opacity: 0.85;
       }
-      #title .radio button {
+      #title .caption {
+        margin: 0 0 -4px;
+        text-align: center;
+        color: #fff;
+        font-size: clamp(16px, 4.4vw, 19px);
+        text-shadow: 0 2px 0 #000, 0 0 6px rgba(0, 0, 0, 0.8);
+      }
+      /* The solo games, each its own page: plainer buttons than Royale's. */
+      #title .solo {
+        display: flex;
+        gap: 12px;
+        margin-top: 4px;
+      }
+      #title .solo button {
         flex: 1;
         font: inherit;
-        font-size: clamp(17px, 4.6vw, 21px);
-        color: rgba(255, 255, 255, 0.75);
-        background: none;
-        border: 0;
-        border-radius: 8px;
-        padding: 6px 0 4px;
         cursor: pointer;
-      }
-      #title .radio button[aria-checked="true"] {
+        font-size: clamp(19px, 5.2vw, 24px);
         color: #2a1208;
         background: #fff;
+        border: 3px solid #2a1208;
+        border-radius: 14px;
+        padding: 6px 0 4px;
+        box-shadow: 0 4px 0 #2a1208;
       }
-      /* The other games, each its own page. */
-      #title .more {
-        display: flex;
-        justify-content: center;
-        gap: 20px;
+      #title .solo button:active {
+        transform: translateY(3px);
+        box-shadow: 0 1px 0 #2a1208;
       }
-      #title .more a {
+      #title .solo button.busy {
+        opacity: 0.6; /* loading, the first time */
+      }
+      /* The solo games (toss.js, run.js), played on this page: their score
+         top right, Toss's wind and distance, Run's message; Royale's own
+         things hidden meanwhile. */
+      #soloHud,
+      #wind,
+      #dist,
+      #msg {
+        display: none;
         color: #fff;
-        font-size: clamp(18px, 5vw, 22px);
         text-shadow: 0 2px 0 #000, 0 0 6px rgba(0, 0, 0, 0.8);
+        pointer-events: none;
+      }
+      body.solo #soloHud,
+      body.solo-toss #wind,
+      body.solo-run #msg {
+        display: block;
+      }
+      body.solo-toss #dist {
+        display: flex;
+        pointer-events: auto;
+      }
+      body.solo #hud,
+      body.solo #topright,
+      body.solo #touch,
+      body.solo #names,
+      body.solo #banner {
+        display: none;
+      }
+      #soloHud {
+        position: absolute;
+        top: 14px;
+        right: 14px;
+        font-size: clamp(18px, 5vw, 26px);
+      }
+      /* The wind: an arrow the way it blows and how hard, as in Paper Toss. */
+      #wind {
+        position: absolute;
+        top: 56px;
+        left: 0;
+        right: 0;
+        text-align: center;
+        font-size: clamp(26px, 8vw, 40px);
+      }
+      #wind span {
+        display: inline-block;
+      }
+      /* How far the basket is. */
+      #dist {
+        position: absolute;
+        left: 50%;
+        bottom: 16px;
+        transform: translateX(-50%);
+        width: min(360px, calc(100vw - 32px));
+      }
+      /* Run's what to do / how it went, mid-screen. */
+      #msg {
+        position: absolute;
+        top: 30%;
+        left: 16px;
+        right: 16px;
+        text-align: center;
+        font-size: clamp(22px, 6.5vw, 34px);
+        line-height: 1.3;
+        white-space: pre-line;
       }
       /* Touch controls — touch devices only: three equal buttons across the
          bottom (◀ ▶ and the action apple). A touch anywhere else on the game
@@ -365,15 +366,28 @@
         position: relative;
         overflow: visible;
       }
-      #action canvas {
-        /* 1.2× the button, like the leaves, and taller still (rising above
-           it), so a full stretch or squash never crops. */
+      /* Your apple (a picture, royale.js), feet on the button's bottom edge,
+         squashed and stretched from there; free to rise above the button. */
+      #actionApple {
         position: absolute;
-        left: -10%;
+        left: 0;
         bottom: 0;
-        width: 120%;
-        height: 162%;
+        width: 100%;
+        height: 100%;
+        object-fit: contain;
+        object-position: bottom;
+        transform-origin: 50% 100%;
         pointer-events: none; /* presses go to the button */
+      }
+      #actionApple:not([src]) {
+        visibility: hidden;
+      }
+      /* Only where the touch bar's pictures are rendered, once, then gone. */
+      #action canvas {
+        position: absolute;
+        width: 64px;
+        height: 64px;
+        visibility: hidden;
       }
       @media (hover: none) and (pointer: coarse) {
         #touch {
@@ -384,10 +398,9 @@
   </head>
   <body>
     <canvas id="renderCanvas"></canvas>
-    <div id="ceiling"></div>
     <div id="names"></div>
     <div id="topleft">
-      <button id="menuBtn" data-act="menu" hidden>Menu</button>
+      <button id="menuBtn" class="menu-button" data-act="menu" hidden>Menu</button>
       <div id="hud"></div>
     </div>
     <div id="topright">
@@ -397,20 +410,29 @@
     <div id="banner"></div>
     <div id="title">
       <p id="titlemsg"></p>
+      <p class="caption">Royale · last apple standing</p>
       <div class="play">
-        <button data-act="local">Local</button>
-        <button data-act="online">Online</button>
+        <button data-act="local">Local<small>vs bots</small></button>
+        <button data-act="online">Online<small>vs players</small></button>
       </div>
       <div class="radio" id="tiers" role="radiogroup" aria-label="Bots"></div>
       <div class="radio" id="controls" role="radiogroup" aria-label="Controls"></div>
-      <div class="more"><a href="toss.html">Apple Toss</a><a href="run.html">Apple Run</a></div>
+      <div class="solo">
+        <button data-act="toss">Apple Toss<small>solo · local only</small></button>
+        <button data-act="run">Apple Run<small>solo · local only</small></button>
+      </div>
     </div>
+    <div id="soloHud"></div>
+    <div id="wind"></div>
+    <div id="dist" class="radio" role="radiogroup" aria-label="Distance"></div>
+    <div id="msg"></div>
     <div id="touch">
       <!-- Filled with your apple's leaves and stem once they're rendered (royale.js). -->
       <div id="stem"></div>
       <button data-code="ArrowLeft" aria-label="Move left"></button>
       <button data-code="ArrowRight" aria-label="Move right"></button>
       <button id="action" aria-label="Jump / pound">
+        <img id="actionApple" alt="" />
         <canvas id="actionCanvas"></canvas>
       </button>
     </div>
@@ -484,10 +506,14 @@
     <script src="node_modules/babylonjs/babylon.js"></script>
     <script src="node_modules/babylonjs-loaders/babylonjs.loaders.min.js"></script>
     <script src="sliceBurst.js"></script>
+    <script src="common.js"></script>
+    <script src="logo.js"></script>
     <script src="grass.js"></script>
     <script src="core.js"></script>
     <script src="net.js"></script>
     <script src="bots.js"></script>
+    <script src="toss.js"></script>
+    <script src="run.js"></script>
     <script src="royale.js"></script>
   </body>
 </html>
