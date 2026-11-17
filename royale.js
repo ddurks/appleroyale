@@ -808,7 +808,7 @@ class Game {
       if (act === "toss" || act === "run") this._playSolo(act, el);
       else this._play(act === "online");
     });
-    // The bots, at the top of the title.
+    // The bots, in the title's multiplayer section.
     document.getElementById("tiers").addEventListener("click", (e) => {
       const el = e.target.closest("[data-tier]");
       if (el) this._setDifficulty(+el.dataset.tier);
@@ -830,11 +830,9 @@ class Game {
       else if (el.dataset.act === "go") this._startNow();
     });
 
-    // Tilt, if it was on last time. iOS asks again on the first tap.
-    if (store.get(TILT_KEY) && isTouch()) {
-      this._applyTilt(true);
-      window.addEventListener("touchend", () => askTilt().then((ok) => ok || this._applyTilt(false)), { once: true });
-    }
+    // Tilt, if it was on last time (iOS is asked again when a game of Royale
+    // is started: _play).
+    if (store.get(TILT_KEY) && isTouch()) this._applyTilt(true);
 
     // Your name: top right, editable any time; shown under your apple.
     this.playerName = store.get(NAME_KEY, "");
@@ -929,7 +927,7 @@ class Game {
     this.ascent = null;
     this.clouds.show(true);
     this.logo.show(true);
-    document.body.classList.remove("arriving");
+    document.body.classList.remove("arriving", "royale");
     document.body.classList.add("titlescreen");
     document.getElementById("titlemsg").textContent = message || "";
     this._renderTitleMenu();
@@ -937,11 +935,11 @@ class Game {
     this._updateHUD();
   }
 
-  // Where the logo fits: between the name box (under the bots, at the top)
-  // and the title's menu, in CSS pixels down from the canvas's top.
+  // Where the logo fits: between the name box and the title's menu, in CSS
+  // pixels down from the canvas's top.
   _logoBand() {
     const box = this.engine.getRenderingCanvas().getBoundingClientRect();
-    return { top: 108, bottom: document.getElementById("title").getBoundingClientRect().top - box.top - 16 };
+    return { top: 64, bottom: document.getElementById("title").getBoundingClientRect().top - box.top - 16 };
   }
 
   _hideTitle() {
@@ -1034,6 +1032,7 @@ class Game {
     this._updateBgScroll();
     // The menu laid out, unseen, for the logo to fit over (_logoBand).
     document.getElementById("titlemsg").textContent = message || "";
+    document.body.classList.remove("royale");
     document.body.classList.add("arriving");
     this.logo.show(true);
     this.logo.fade(0);
@@ -1081,6 +1080,9 @@ class Game {
   // Local or Online, from the title: into that lobby.
   _play(online) {
     this.input.sample(); // drop taps made on the title
+    document.body.classList.add("royale");
+    // Tilting: the tap that got here is iOS's leave to ask for it.
+    if (this.input.tilt) askTilt().then((ok) => ok || this._applyTilt(false));
     const fromY = this.camera.position.y;
     if (online) {
       this._hideTitle();

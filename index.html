@@ -140,8 +140,8 @@
       }
       /* The title menu, under the 3D logo (royale.js TitleScreen): two
          sections, each a caption over a pair of buttons. Multiplayer is Apple
-         Royale, Local or Online (red); Single player is Apple Toss and Apple
-         Run (leaf green). */
+         Royale: its bots (a radio group), then Local or Online (red). Single
+         player is Apple Toss and Apple Run (leaf green). */
       #title {
         display: none;
         position: absolute;
@@ -234,22 +234,6 @@
       }
       #title .solo button.busy {
         opacity: 0.6; /* loading, the first time */
-      }
-      /* The bots, on the title: at the top, your name under them. */
-      #tiers {
-        display: none;
-        position: absolute;
-        left: 50%;
-        top: 12px;
-        transform: translateX(-50%);
-        width: min(360px, calc(100vw - 32px));
-      }
-      body.titlescreen #tiers {
-        display: flex;
-        animation: titleIn 0.7s ease-out both;
-      }
-      body.titlescreen #topright {
-        top: 68px;
       }
       /* The solo games (toss.js, run.js), played on this page: their score
          top right, Toss's wind and distance, Run's message; Royale's own
@@ -433,9 +417,9 @@
         height: 64px;
         visibility: hidden;
       }
-      /* Buttons or tilt: on touch screens, in Royale's lobbies and rounds, at
-         the top as Toss's distances are, Menu, the status and your name
-         under it. */
+      /* Buttons or tilt: on touch screens, in Royale's lobbies and rounds
+         (body.royale, royale.js), at the top as Toss's distances are, Menu,
+         the status and your name under it. */
       #controls {
         display: none;
         position: absolute;
@@ -448,11 +432,11 @@
         #touch {
           display: flex;
         }
-        body:not(.titlescreen):not(.solo) #controls:not(:empty) {
+        body.royale #controls {
           display: flex;
         }
-        body:not(.titlescreen):not(.solo) #topleft,
-        body:not(.titlescreen):not(.solo) #topright {
+        body.royale #topleft,
+        body.royale #topright {
           top: 68px;
         }
       }
@@ -469,12 +453,12 @@
       <input id="name" maxlength="16" placeholder="Your name" autocomplete="off" spellcheck="false" aria-label="Your name" />
       <div id="bar"></div>
     </div>
-    <div class="radio" id="tiers" role="radiogroup" aria-label="Bots"></div>
     <div class="radio" id="controls" role="radiogroup" aria-label="Controls"></div>
     <div id="banner"></div>
     <div id="title">
       <p id="titlemsg"></p>
       <p class="caption">Multiplayer · Apple Royale</p>
+      <div class="radio" id="tiers" role="radiogroup" aria-label="Bots"></div>
       <div class="play">
         <button data-act="local">Local<small>vs bots</small></button>
         <button data-act="online">Online<small>vs players</small></button>
