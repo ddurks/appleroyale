@@ -52,6 +52,7 @@ const COLUMN_TOP_H = 9.7; // the dome at its top, scallops and all
 const COLUMN_DEEP = 0.34; // how dark its leaves get, deepest inside
 const COLUMN_OPEN_TIME = 1.4; // seconds for the near half to fade away as a round begins
 const GO_BANNER_TIME = 0.6; // "GO!" stays up this long after the countdown
+const ASCENT_TIME = 1.6; // seconds for the view to rise back up to the title
 
 // Online (net.js): other apples are drawn this many steps behind the newest
 // snapshot (67 ms: two snapshot gaps), so there's always one to blend toward.
@@ -911,7 +912,8 @@ class Game {
     document.body.classList.remove("falling");
     this._placeCrown();
     this.crown.setEnabled(true);
-    this.clouds.scatter();
+    if (!this.ascent) this.clouds.scatter(); // risen to: the sky's already there
+    this.ascent = null;
     this.clouds.show(true);
     this.logo.show(true);
     document.body.classList.add("titlescreen");
@@ -994,6 +996,42 @@ class Game {
     return camY;
   }
 
+  // Back to the title, the fall in reverse: the view rises up the tree to
+  // the treetop's sky, where the logo waits. The round stays as it was.
+  _beginAscent(message) {
+    const cam = this.camera;
+    const from = { x: cam.position.x - this.shakeOff.x, y: cam.position.y - this.shakeOff.y };
+    this.shakeOff.x = this.shakeOff.y = 0;
+    this._placeCrown(); // the title's view, to lay the logo out in
+    this.logo.show(true);
+    this.logo.update(0);
+    const to = cam.position.y;
+    cam.position.x = from.x;
+    cam.position.y = from.y;
+    this.descent = null;
+    document.body.classList.remove("falling");
+    const you = this.views[this.humanIdx];
+    if (you) you.mesh.setEnabled(true);
+    this.ascent = { t: 0, from, to, message };
+    this.state = "ascent";
+    this.clouds.scatter();
+    this.clouds.show(true);
+    this._clearLabels();
+    this.setBanner("");
+    this._updateHUD();
+  }
+
+  _advanceAscent(dt) {
+    const a = this.ascent;
+    a.t += dt;
+    this.clouds.update(dt);
+    const e = fallEase(a.t / ASCENT_TIME);
+    this.camera.position.x = a.from.x * (1 - e);
+    this.camera.position.y = a.from.y + (a.to - a.from.y) * e;
+    this._updateBgScroll();
+    if (a.t >= ASCENT_TIME) this._showTitle(a.message);
+  }
+
   // Local or Online, from the title: into that lobby.
   _play(online) {
     this.input.sample(); // drop taps made on the title
@@ -1050,7 +1088,7 @@ class Game {
   _menu() {
     if (this.solo) this._leaveSolo();
     else if (this.online) this._goOffline();
-    else if (this.state === "lobby" || this.state === "over") this._showTitle();
+    else if (this.state === "lobby" || this.state === "over") this._beginAscent();
   }
 
   _updateOrtho() {
@@ -1173,6 +1211,12 @@ class Game {
     for (const bv of this.branchViews.values()) bv.dispose();
     this.views = [];
     this.branchViews.clear();
+    this._clearLabels();
+  }
+
+  _clearLabels() {
+    for (const el of this.labels) el.remove();
+    this.labels = [];
   }
 
   _startLobby() {
@@ -1288,6 +1332,10 @@ class Game {
       this._placeCrown(); // the view's size may have changed
       this.clouds.update(dt);
       this.logo.update(dt);
+      return;
+    }
+    if (this.state === "ascent") {
+      this._advanceAscent(dt);
       return;
     }
     const fallY = this._advanceDescent(dt);
@@ -1451,8 +1499,8 @@ class Game {
     this.online = null;
     o.net.close();
     this.input.consumeRestart(); // a press from online doesn't restart offline
+    this._beginAscent(message);
     this.humanIdx = Math.floor(NUM_APPLES / 2);
-    this._showTitle(message);
   }
 
   // A fresh match (or our first): a mirror round in its lobby, lobby scenery.
@@ -1934,7 +1982,7 @@ class Game {
     let text = "";
     if (this.online) text = this._onlineStatus();
     else if (this.state === "lobby") text = `Round starts in ${Math.max(0, Math.ceil(this.lobbyTimer))}`;
-    else if (this.state !== "transition" && this.state !== "title") text = this._aliveStatus();
+    else if (this.state !== "transition" && this.state !== "title" && this.state !== "ascent") text = this._aliveStatus();
     if (text !== this.hud.textContent) this.hud.textContent = text;
   }
 
@@ -2044,7 +2092,7 @@ class Game {
   // round begins (and back for the next lobby).
   _updateColumn(dt) {
     if (!this.columnFront) return;
-    const whole = this.state === "lobby" || this.state === "title" || this.state === "loading";
+    const whole = this.state === "lobby" || this.state === "title" || this.state === "loading" || this.state === "ascent";
     const to = whole ? 0 : 1;
     if (this.columnOpen === to) return;
     this.columnOpen = Math.max(0, Math.min(1, this.columnOpen + ((to ? 1 : -1) * dt) / COLUMN_OPEN_TIME));
