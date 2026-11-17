@@ -2066,8 +2066,11 @@ class Game {
     this.columnOpen = 0; // 0 whole … 1 the near half gone
     // The inside's leaves, not drawn while the near half covers them (its
     // dark skin, trunk and apples stay: they show through the near leaves).
+    // Once they're drawn the skin goes instead, so it's the sky that shows
+    // between them.
     this.columnBack = root.getChildMeshes(false).filter((m) => m.material && /leaf/.test(m.material.name));
     for (const m of this.columnBack) m.setEnabled(false);
+    this.columnSkin = root.getChildMeshes(false).filter((m) => m.material && /canopy/.test(m.material.name));
 
     // The platforms are its trunk's wood.
     this.branchMats.platform = c.materials.find((m) => /bark/.test(m.name)) || this.branchMats.platform;
@@ -2098,6 +2101,7 @@ class Game {
     this.columnOpen = Math.max(0, Math.min(1, this.columnOpen + ((to ? 1 : -1) * dt) / COLUMN_OPEN_TIME));
     this.columnFront.setEnabled(this.columnOpen < 1);
     for (const m of this.columnBack) m.setEnabled(this.columnOpen > 0);
+    for (const m of this.columnSkin) m.setEnabled(this.columnOpen === 0);
     for (const mat of this.columnFrontMats.values()) {
       mat.alpha = 1 - this.columnOpen;
       mat.needDepthPrePass = this.columnOpen > 0; // whole, it needn't be drawn twice

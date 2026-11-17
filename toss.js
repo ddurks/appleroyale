@@ -85,7 +85,13 @@
   const FLICK_MIN_PX = 40;
   const FLICK_MAX_MS = 700;
 
-  const LEAVES = 14;
+  // Loose leaves on the wind, from just in front of the camera to behind
+  // the bucket, up to the middle of the trees' canopies, each blowing right
+  // across the view at its distance and round again out of sight.
+  const LEAVES_PER = 0.7; // to a unit of that depth, in the strongest wind (fewer in less, none in none)
+  const LEAVES_NEAR = 4; // the nearest, in front of the camera
+  const LEAVES_FAR = 44; // the farthest (z)
+  const LEAVES_PAST = 1.5; // how far past the view's edge one turns back (more than its own length)
 
   // ─── Grass ───────────────────────────────────────────────────────────
   // The field (grass.js): blades sown where the camera looks, thinning with
@@ -456,13 +462,35 @@
       src.rotationQuaternion = null;
       src.material.backFaceCulling = false;
       src.isVisible = false;
+      this.leafSrc = src;
       this.leaves = [];
-      for (let i = 0; i < LEAVES; i++) {
-        const mesh = src.createInstance(`windLeaf${i}`);
-        mesh.scaling.setAll(0.3);
-        mesh.position.set(-16 + 32 * Math.random(), 1 + 9 * Math.random(), 8 + 36 * Math.random());
-        this.leaves.push({ mesh, phase: 6.28 * Math.random(), spin: 2 + 3 * Math.random() });
+    }
+
+    // The loose leaves for this level (the farther the camera, the more),
+    // anywhere in their stretch of air.
+    _placeLeaves() {
+      const near = this.camera.position.z + LEAVES_NEAR;
+      this.leafTop = Math.max(...this.treeShapes.map((t) => t.c.y));
+      const n = Math.round(LEAVES_PER * (LEAVES_FAR - near));
+      while (this.leaves.length < n) {
+        const mesh = this.leafSrc.createInstance(`windLeaf${this.leaves.length}`);
+        this.leaves.push({ mesh, size: 0, phase: 6.28 * Math.random(), spin: 2 + 3 * Math.random() });
       }
+      this.leafCount = n;
+      this.leaves.forEach((l, i) => {
+        if (i >= n) l.size = 0;
+        l.mesh.position.set(0, 1 + (this.leafTop - 1) * Math.random(), near + (LEAVES_FAR - near) * Math.random());
+        l.mesh.position.x = this._leafReach(l.mesh.position) * (2 * Math.random() - 1);
+      });
+    }
+
+    // How far either side of the middle a leaf at p blows: just out of the
+    // view there, whatever the screen's shape.
+    _leafReach(p) {
+      const cam = this.camera;
+      const depth = V3.Dot(p.subtract(this.camBase.position), this.camFwd);
+      const aspect = this.engine.getRenderWidth() / this.engine.getRenderHeight();
+      return Math.max(0, depth) * Math.tan(cam.fov / 2) * aspect + LEAVES_PAST;
     }
 
     // Four of the tree (assets/tosstree.glb, from appletree.blend's TossTree
@@ -625,10 +653,13 @@
       this.stump.position.z = d.stumpZ;
       this.start.z = d.stumpZ;
       this.camera.position.set(0, CAM_Y, d.stumpZ - CAM_BACK);
-      this.camera.setTarget(new V3(0, 1.0, (d.z + d.stumpZ) * 0.5));
+      const target = new V3(0, 1.0, (d.z + d.stumpZ) * 0.5);
+      this.camera.setTarget(target);
       this._sow();
       this.camBase = { position: this.camera.position.clone(), rotation: this.camera.rotation.clone() };
+      this.camFwd = target.subtract(this.camera.position).normalize();
       this._placeTrees();
+      this._placeLeaves();
       this.score = 0;
       this._reset();
     }
@@ -975,17 +1006,31 @@
     }
 
     _blowLeaves(dt) {
-      for (const l of this.leaves) {
+      // As many as the wind is strong, the rest shrunk away to nothing (and
+      // growing back when it picks up).
+      const out = (Math.abs(this.wind) / WIND_MAX) * this.leafCount;
+      this.leaves.forEach((l, i) => {
         const m = l.mesh;
+        l.size = Math.max(0, Math.min(1, l.size + (i < out ? dt : -dt)));
+        m.setEnabled(l.size > 0);
+        m.scaling.setAll(0.3 * l.size);
+        if (!l.size) return;
         l.phase += dt;
         m.position.x += this.grass.wind * 1.4 * dt; // the wind as the grass feels it, easing round
         m.position.y += (0.5 * Math.sin(l.phase * 1.7) - 0.25) * dt;
         m.rotation.x += l.spin * dt;
         m.rotation.z += 0.6 * l.spin * dt;
-        if (m.position.x > 16) m.position.x -= 32;
-        if (m.position.x < -16) m.position.x += 32;
-        if (m.position.y < 0.6) m.position.y = 10;
-      }
+        // Out of one side of the view, back in at the other; and one that
+        // comes down into the grass (right under, out of sight), back in
+        // upwind, at any height.
+        const reach = this._leafReach(m.position);
+        if (m.position.y < -0.6) {
+          m.position.y = 1 + (this.leafTop - 1) * Math.random();
+          m.position.x = this.wind > 0 ? -reach : reach;
+        }
+        if (m.position.x > reach) m.position.x = -reach;
+        if (m.position.x < -reach) m.position.x = reach;
+      });
     }
   }
 
