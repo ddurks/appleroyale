@@ -1,7 +1,8 @@
 // Grass, for Apple Toss's field and Apple Royale's lobby: single blades
 // (one mesh, drawn once per blade), bent in the vertex shader: a steady
 // lean downwind, gusts rolling across the way the wind blows, and each
-// blade's own flutter. Whoever uses it sows the blades (Grass.blade).
+// blade's own flutter; brushed with the leaves' picture (assets/leaf.png).
+// Whoever uses it sows the blades (Grass.blade).
 
 const GRASS_SOIL = "#3a7d24"; // the ground between the blades
 
@@ -17,6 +18,7 @@ uniform vec2 gustAt; // how far the wide gusts and the ripples have travelled
 varying float vUp;
 varying float vTint;
 varying float vGust;
+varying vec2 vPicture;
 void main() {
 #include<instancesVertex>
   vec3 root = finalWorld[3].xyz;
@@ -37,19 +39,24 @@ void main() {
   p.y -= (1.0 - cos(min(abs(lean), 1.3))) * bend; // a bent blade is lower
   vUp = up;
   vTint = rnd;
+  vPicture = vec2(7.0 * rnd + 0.06 * uv.x, fract(3.0 * rnd) + 0.35 * up); // each blade its own strip of the brushwork
+
   vGust = gust * min(hard / 3.0, 1.0);
   gl_Position = viewProjection * p;
 }`;
 BABYLON.Effect.ShadersStore.grassFragmentShader = `
 precision highp float;
+uniform sampler2D picture;
 varying float vUp;
 varying float vTint;
 varying float vGust;
+varying vec2 vPicture;
 void main() {
   vec3 low = vec3(0.09, 0.27, 0.06);
   vec3 high = mix(vec3(0.36, 0.68, 0.18), vec3(0.52, 0.78, 0.24), vTint);
   vec3 c = mix(low, high, vUp * vUp * 0.4 + vUp * 0.6);
   c += vec3(0.10, 0.11, 0.04) * vGust * vUp; // gusts show as paler bands
+  c *= 1.2 * texture2D(picture, vPicture).rgb; // the leaves' brushwork (assets/leaf.png: about 1 / 1.2 on average)
   gl_FragColor = vec4(c, 1.0);
 }`;
 
@@ -62,7 +69,10 @@ class Grass {
     this.mat = new BABYLON.ShaderMaterial("grassMat", scene, "grass", {
       attributes: ["position", "uv"],
       uniforms: ["world", "viewProjection", "time", "wind", "gustAt"],
+      samplers: ["picture"],
     });
+    this.picture = new BABYLON.Texture("./assets/leaf.png", scene);
+    this.mat.setTexture("picture", this.picture);
     this.mat.backFaceCulling = false;
     this.mesh.material = this.mat;
     this.time = 0;
@@ -134,6 +144,7 @@ class Grass {
   dispose() {
     for (const m of this.meshes) m.dispose();
     this.mat.dispose();
+    this.picture.dispose();
   }
 
   // Blade i of `matrices`: rooted at x, y, z, turned any way round.

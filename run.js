@@ -13,9 +13,31 @@
 
   const BRANCH_R = 2.2; // the branch's radius; its top is y 0
 
+  // It gets harder the farther you've rolled. Faster: quickly from
+  // SPEED_START to SPEED_FAST (about a minute), then creeping up towards
+  // SPEED_MAX. And tighter (hardness, 0 easiest to 1): shorter straights,
+  // more obstacles and closer together, nearer the corners, and a gap now
+  // and then straight after a bough. Each pair below is easiest, hardest.
   const SPEED_START = 12;
-  const SPEED_MAX = 24;
-  const SPEED_UP = 0.22; // per second
+  const SPEED_FAST = 24;
+  const SPEED_MAX = 34;
+  const SPEED_UP = 0.22; // per second, up to SPEED_FAST
+  const SPEED_CREEP = 6000; // the distance over which most of the rest comes
+  const SPEED_FAST_AT = (SPEED_FAST ** 2 - SPEED_START ** 2) / (2 * SPEED_UP); // how far along SPEED_FAST is reached
+  const speedAt = (dist) =>
+    dist < SPEED_FAST_AT
+      ? Math.sqrt(SPEED_START ** 2 + 2 * SPEED_UP * dist)
+      : SPEED_FAST + (SPEED_MAX - SPEED_FAST) * (1 - Math.exp(-(dist - SPEED_FAST_AT) / SPEED_CREEP));
+  const HARD_DIST = 2500; // by here it's two thirds of the way to its hardest
+  const hardness = (dist) => 1 - Math.exp(-dist / HARD_DIST);
+  const EASY_DIST = 250; // the opening stretch: obstacles few, more by its end
+  const STRAIGHT_MIN = [2.4, 1.6]; // seconds a straight lasts, at least…
+  const STRAIGHT_MORE = [2.4, 1.4]; // …and at most this much longer
+  const BETWEEN = [1.3, 0.7]; // seconds from the end of one obstacle to the next, give or take 30%
+  const OBSTACLE_CHANCE = [0.6, 0.95]; // of there being each
+  const CORNER_CLEAR = [1, 0.45]; // seconds clear of obstacles either side of a corner
+  const COMBO = 0.5; // at its hardest, how often a gap comes straight after a bough…
+  const COMBO_AFTER = 0.45; // …this many seconds on
   const GRAVITY = 36;
   const JUMP_V = 13.5;
   const DUCK_TIME = 0.7;
@@ -30,6 +52,7 @@
   const TURN_EARLY = 0.8; // seconds before a corner from when a swipe left or right counts
   const TURN_LATE = 0.15; // seconds past it that one still makes the turn (no further than the bend)
   const SWIPE_PX = 28;
+  const WAY_LIGHT = 0.45; // how much lighter the branch's top is painted, the way to go
   const BARK_TILE = 6; // how much branch one copy of the bark picture covers, each way
   const BEND_R = 2.6; // the radius of the branch's bend at a corner (more than its own, so the inside doesn't pinch)
 
@@ -127,8 +150,8 @@
     vTint = fract(sin(dot(finalWorld[3].xyz, vec3(12.9898, 78.233, 37.719))) * 43758.5453);
     gl_Position = viewProjection * w;
   }`;
-  BABYLON.Effect.ShadersStore.woodVertexShader = envVertex(true, false);
-  BABYLON.Effect.ShadersStore.leafVertexShader = envVertex(false, true);
+  BABYLON.Effect.ShadersStore.woodVertexShader = envVertex(true, true);
+  BABYLON.Effect.ShadersStore.leafVertexShader = envVertex(true, true);
   const LIGHT_GLSL = "const vec3 LIGHT = vec3(0.27, 0.92, -0.28);";
   BABYLON.Effect.ShadersStore.woodFragmentShader = `
   precision highp float;
@@ -137,11 +160,12 @@
   varying vec3 vWorld;
   varying vec3 vNormal;
   varying vec2 vUV;
+  varying vec3 vColor;
   ${SURROUND_GLSL}
   ${LIGHT_GLSL}
   void main() {
     float lit = 0.4 + 0.6 * max(dot(normalize(vNormal), LIGHT), 0.0);
-    vec3 c = texture2D(bark, vUV).rgb * lit;
+    vec3 c = texture2D(bark, vUV).rgb * vColor * lit; // its paint: lighter along the top of the branch you roll on
     gl_FragColor = vec4(inTree(c, vWorld, eye), 1.0);
   }`;
   // Leaves: each its own shade; lit either side, brighter with the light
@@ -149,8 +173,10 @@
   BABYLON.Effect.ShadersStore.leafFragmentShader = `
   precision highp float;
   uniform vec3 eye;
+  uniform sampler2D picture;
   varying vec3 vWorld;
   varying vec3 vNormal;
+  varying vec2 vUV;
   varying float vTint;
   varying vec3 vColor;
   ${SURROUND_GLSL}
@@ -160,101 +186,123 @@
     vec3 toEye = normalize(eye - vWorld);
     if (dot(n, toEye) < 0.0) n = -n;
     float lit = 0.42 + 0.5 * max(dot(n, LIGHT), 0.0) + 0.25 * max(dot(-n, LIGHT), 0.0);
-    // the leaf's paint (lighter blade, darker edges and creases), each leaf a shade of its own
-    vec3 c = pow(vColor, vec3(1.0 / 2.2)) * mix(0.8, 1.15, vTint) * lit;
+    // the leaf's paint (lighter blade, darker edges and creases) under its
+    // picture's brushwork (assets/leaf.png), each leaf a shade of its own
+    vec3 paint = vColor * pow(texture2D(picture, vUV).rgb, vec3(2.2));
+    vec3 c = pow(paint, vec3(1.0 / 2.2)) * mix(0.8, 1.15, vTint) * lit;
     gl_FragColor = vec4(inTree(c, vWorld, eye), 1.0);
   }`;
 
-  // A limb along a path of points, radius(t) for t 0 → 1 along it, lumpy
-  // with bark; capped at both ends. A flat top (the branch you roll on) keeps
-  // the lumps to its sides, so the top stays where the apple rolls, and
-  // smooths them away at the ends, so its pieces meet without a step.
-  function limbMesh(name, path, radius, scene, flatTop = false) {
-    const SIDES = 18;
-    const positions = [];
-    const normals = [];
-    const uvs = [];
-    const indices = [];
-    const lens = [0];
-    for (let i = 1; i < path.length; i++) lens.push(lens[i - 1] + V3.Distance(path[i], path[i - 1]));
-    const total = lens[lens.length - 1];
-    const seed = 6.28 * Math.random();
-    // Each ring's frame carried on from the last (so it never flips and
-    // pinches where the limb turns upright).
-    const inner = (i) => path[i + 1].subtract(path[i - 1]).normalize();
-    // At an end, the way the path is really going there (the last chord
-    // turned on by as much as the path turns over it), not just the chord's
-    // way, so a bend's ends sit square against the straights they meet.
-    const tangent = (i) => {
-      if (path.length < 3) return path[path.length - 1].subtract(path[0]).normalize();
-      if (i === 0) return path[1].subtract(path[0]).normalize().scale(2).subtract(inner(1)).normalize();
-      const n = path.length - 1;
-      if (i === n) return path[n].subtract(path[n - 1]).normalize().scale(2).subtract(inner(n - 1)).normalize();
-      return inner(i);
-    };
-    const frames = [];
-    for (let i = 0; i < path.length; i++) {
-      const t = tangent(i);
-      let side = i ? frames[i - 1].side : V3.Cross(Math.abs(t.y) > 0.9 ? new V3(1, 0, 0) : new V3(0, 1, 0), t);
-      side = side.subtract(t.scale(V3.Dot(side, t))).normalize();
-      frames.push({ t, side, up: V3.Cross(t, side).normalize() });
+  // Wood: limbs gathered into one mesh (limb after limb, then mesh()).
+  class Wood {
+    constructor() {
+      this.positions = [];
+      this.normals = [];
+      this.uvs = [];
+      this.colors = [];
+      this.indices = [];
     }
-    for (let i = 0; i < path.length; i++) {
-      const frame = frames[i];
-      const r = radius(lens[i] / total);
-      const around = Math.max(1, Math.round((2 * Math.PI * r) / BARK_TILE)); // copies of the bark round it
-      for (let k = 0; k <= SIDES; k++) {
-        const a = (2 * Math.PI * k) / SIDES;
-        const dir = frame.side.scale(Math.cos(a)).add(frame.up.scale(Math.sin(a)));
-        let bump = 0.07 * Math.sin(3 * a + 0.9 * lens[i] + seed) + 0.05 * Math.sin(7 * a - 2.3 * lens[i] + 2 * seed);
-        if (flatTop) bump *= Math.min(1, Math.max(0, (0.6 - dir.y) / 0.4), lens[i] / 1.5, (total - lens[i]) / 1.5);
-        const p = path[i].add(dir.scale(r * (1 + bump)));
-        positions.push(p.x, p.y, p.z);
-        normals.push(dir.x, dir.y, dir.z);
-        uvs.push((around * k) / SIDES, lens[i] / BARK_TILE);
-        if (i > 0 && k < SIDES) {
-          const c = i * (SIDES + 1) + k;
-          const b = c - (SIDES + 1);
-          indices.push(b, c, b + 1, c, c + 1, b + 1);
+
+    // A limb along a path of points, radius(t) for t 0 → 1 along it, lumpy
+    // with bark; capped at both ends. A flat top (the branch you roll on)
+    // keeps the lumps to its sides, so the top stays where the apple rolls,
+    // and smooths them away at the ends, so its pieces meet without a step;
+    // and it's painted lighter along its top, the way to go.
+    limb(path, radius, flatTop = false, SIDES = 18) {
+      const { positions, normals, uvs, colors, indices } = this;
+      const first = positions.length / 3;
+      const lens = [0];
+      for (let i = 1; i < path.length; i++) lens.push(lens[i - 1] + V3.Distance(path[i], path[i - 1]));
+      const total = lens[lens.length - 1];
+      const seed = 6.28 * Math.random();
+      // Each ring's frame carried on from the last (so it never flips and
+      // pinches where the limb turns upright).
+      const inner = (i) => path[i + 1].subtract(path[i - 1]).normalize();
+      // At an end, the way the path is really going there (the last chord
+      // turned on by as much as the path turns over it), not just the chord's
+      // way, so a bend's ends sit square against the straights they meet.
+      const tangent = (i) => {
+        if (path.length < 3) return path[path.length - 1].subtract(path[0]).normalize();
+        if (i === 0) return path[1].subtract(path[0]).normalize().scale(2).subtract(inner(1)).normalize();
+        const n = path.length - 1;
+        if (i === n) return path[n].subtract(path[n - 1]).normalize().scale(2).subtract(inner(n - 1)).normalize();
+        return inner(i);
+      };
+      const frames = [];
+      for (let i = 0; i < path.length; i++) {
+        const t = tangent(i);
+        let side = i ? frames[i - 1].side : V3.Cross(Math.abs(t.y) > 0.9 ? new V3(1, 0, 0) : new V3(0, 1, 0), t);
+        side = side.subtract(t.scale(V3.Dot(side, t))).normalize();
+        frames.push({ t, side, up: V3.Cross(t, side).normalize() });
+      }
+      for (let i = 0; i < path.length; i++) {
+        const frame = frames[i];
+        const r = radius(lens[i] / total);
+        const around = Math.max(1, Math.round((2 * Math.PI * r) / BARK_TILE)); // copies of the bark round it
+        for (let k = 0; k <= SIDES; k++) {
+          const a = (2 * Math.PI * k) / SIDES;
+          const dir = frame.side.scale(Math.cos(a)).add(frame.up.scale(Math.sin(a)));
+          let bump = 0.07 * Math.sin(3 * a + 0.9 * lens[i] + seed) + 0.05 * Math.sin(7 * a - 2.3 * lens[i] + 2 * seed);
+          if (flatTop) bump *= Math.min(1, Math.max(0, (0.6 - dir.y) / 0.4), lens[i] / 1.5, (total - lens[i]) / 1.5);
+          const p = path[i].add(dir.scale(r * (1 + bump)));
+          positions.push(p.x, p.y, p.z);
+          normals.push(dir.x, dir.y, dir.z);
+          uvs.push((around * k) / SIDES, lens[i] / BARK_TILE);
+          const way = flatTop ? WAY_LIGHT * Math.min(1, Math.max(0, (dir.y - 0.6) / 0.3)) : 0;
+          colors.push(1 + way, 1 + way, 1 + 0.6 * way, 1);
+          if (i > 0 && k < SIDES) {
+            const c = first + i * (SIDES + 1) + k;
+            const b = c - (SIDES + 1);
+            indices.push(b, c, b + 1, c, c + 1, b + 1);
+          }
+        }
+      }
+      // the ends, flat
+      for (const [i, sign] of [[0, -1], [path.length - 1, 1]]) {
+        const f = frames[i];
+        const centre = positions.length / 3;
+        positions.push(path[i].x, path[i].y, path[i].z);
+        normals.push(f.t.x * sign, f.t.y * sign, f.t.z * sign);
+        uvs.push(0.5, 0.5);
+        colors.push(1, 1, 1, 1);
+        // wound to face out of its own end
+        for (let k = 0; k < SIDES; k++) {
+          const ring = first + i * (SIDES + 1) + k;
+          indices.push(centre, sign < 0 ? ring : ring + 1, sign < 0 ? ring + 1 : ring);
         }
       }
     }
-    // the ends, flat
-    for (const [i, sign] of [[0, -1], [path.length - 1, 1]]) {
-      const f = frames[i];
-      const centre = positions.length / 3;
-      positions.push(path[i].x, path[i].y, path[i].z);
-      normals.push(f.t.x * sign, f.t.y * sign, f.t.z * sign);
-      uvs.push(0.5, 0.5);
-      for (let k = 0; k < SIDES; k++) indices.push(centre, i * (SIDES + 1) + k, i * (SIDES + 1) + k + 1);
+
+    mesh(name, scene) {
+      const mesh = new BABYLON.Mesh(name, scene);
+      const vd = new BABYLON.VertexData();
+      vd.positions = this.positions;
+      vd.normals = this.normals;
+      vd.uvs = this.uvs;
+      vd.colors = this.colors;
+      vd.indices = this.indices;
+      vd.applyToMesh(mesh);
+      mesh.isPickable = false;
+      return mesh;
     }
-    const mesh = new BABYLON.Mesh(name, scene);
-    const vd = new BABYLON.VertexData();
-    vd.positions = positions;
-    vd.normals = normals;
-    vd.uvs = uvs;
-    vd.indices = indices;
-    vd.applyToMesh(mesh);
-    mesh.isPickable = false;
-    return mesh;
   }
 
   // A smooth curve through a few points.
   const curve = (pts, per = 8) => BABYLON.Curve3.CreateCatmullRomSpline(pts, per).getPoints();
 
-  // A sprig of 2 to 10 leaves laid like the Apple Toss tree's: round the
-  // top and sides of a small ball, each leaf's face turned outward and its
-  // tip hanging down and a little out, so they overlap like shingles and
-  // show their faces from outside. Adds a matrix per leaf to `out`.
-  function leafClump(out, centre) {
-    const n = 2 + Math.floor(9 * Math.random());
+  // A ball of n leaves laid like the Apple Toss tree's: evenly round the
+  // top and sides of a small ball (a spiral, each a golden angle on from the
+  // last), each leaf's face turned outward and its tip hanging down and a
+  // little out, so they overlap like shingles and show their faces from
+  // outside. Adds a matrix per leaf to `out`.
+  function leafClump(out, centre, n = 6) {
     const radius = 3.7 * LEAF * (0.18 + 0.045 * n); // snug round so few
     const golden = Math.PI * (3 - Math.sqrt(5));
     const turn = 6.28 * Math.random();
     for (let i = 0; i < n; i++) {
       const y = 0.9 - (1.25 * (i + 0.5)) / n; // from the top down to a little below the middle
       const ring = Math.sqrt(1 - y * y);
-      const a = turn + golden * i + 0.3 * Math.random();
+      const a = turn + golden * i;
       const out3 = new V3(ring * Math.cos(a), y, ring * Math.sin(a));
       let tip = new V3(0, -1, 0).subtract(out3.scale(-out3.y)); // down, along the surface
       if (tip.lengthSquared() < 1e-3) tip = new V3(1, 0, 0);
@@ -262,50 +310,83 @@
       const face = out3.subtract(tip.scale(V3.Dot(out3, tip))).normalize();
       const across = V3.Cross(tip, face);
       const q = BABYLON.Quaternion.RotationQuaternionFromAxis(across, tip, face);
-      const pos = centre.add(out3.scale(radius * (0.85 + 0.25 * Math.random())));
-      const s = LEAF * (0.9 + 0.2 * Math.random());
+      const pos = centre.add(out3.scale(radius));
+      const s = LEAF;
       BABYLON.Matrix.Compose(new V3(s, s, s), q, pos).copyToArray(out, out.length);
     }
   }
 
-  // Leaves along a twig the way a sprig grows them: one after another up its
-  // outer half, each turned on round the twig from the last (the golden
-  // angle) and reaching out and forward, of all sizes, then a fan of them at
-  // the tip. None reaches back the way `keepOff` doesn't point (towards the
-  // branch you roll on). Adds a matrix per leaf to `out`.
-  function leafSprig(out, path, keepOff) {
-    const up = new V3(0, 1, 0);
-    // a leaf from `base` pointing along `tip`, its face turned the way `lean` leans
-    const put = (base, tip, lean) => {
+  // The tree grows by one rule, over and over: a limb sends off smaller
+  // ones, each FORK_SCALE its size and turned FORK from it, one to each side.
+  const FORK = 0.66; // radians
+  const FORK_SCALE = 0.62;
+  // The great limbs standing all round each straight: how many, and how far
+  // off to either side; those nearer than LIMB_LINKED reach a branch across.
+  const LIMBS = 9;
+  const LIMB_NEAR = 22;
+  const LIMB_FAR = 150;
+  const LIMB_LINKED = 65;
+  const UP = new V3(0, 1, 0);
+  const turned = (v, angle) => V3.TransformNormal(v, BABYLON.Matrix.RotationY(angle));
+
+  // n leaves (an odd few) fanned flat from a twig's tip, faces up: one
+  // straight on, smaller ones each side. None reaches back the way `keepOff`
+  // doesn't point (towards the branch you roll on). Adds a matrix per leaf
+  // to `out`.
+  function leafFan(out, base, along, keepOff, size, n) {
+    let side = V3.Cross(UP, along);
+    if (side.lengthSquared() < 1e-3) side = new V3(1, 0, 0);
+    side.normalize();
+    for (let j = 0; j < n; j++) {
+      const a = (n > 3 ? 0.6 : 0.85) * (j - (n - 1) / 2);
+      let tip = along.scale(Math.cos(a)).add(side.scale(Math.sin(a))).add(UP.scale(-0.12));
       const back = V3.Dot(tip, keepOff);
       if (back < 0) tip = tip.subtract(keepOff.scale(2 * back));
       tip.normalize();
-      const face = lean.subtract(tip.scale(V3.Dot(lean, tip))).normalize();
+      const face = UP.subtract(tip.scale(V3.Dot(UP, tip))).normalize();
       const q = BABYLON.Quaternion.RotationQuaternionFromAxis(V3.Cross(tip, face), tip, face);
-      const s = LEAF * (0.7 + 0.55 * Math.random());
+      const s = LEAF * size * (1 - 0.25 * Math.abs(a));
       BABYLON.Matrix.Compose(new V3(s, s, s), q, base.add(tip.scale(LEAF_STEM * s))).copyToArray(out, out.length);
-    };
-    const frame = (i) => {
-      const along = path[i].subtract(path[i - 1]).normalize();
-      let side = V3.Cross(along, up);
-      if (side.lengthSquared() < 1e-3) side = new V3(1, 0, 0);
-      side.normalize();
-      return { along, side, lift: V3.Cross(side, along) };
-    };
-    const round = ({ side, lift }, a) => side.scale(Math.cos(a)).add(lift.scale(Math.sin(a)));
-    let turn = 6.28 * Math.random();
-    for (let i = Math.ceil(path.length * 0.4); i < path.length - 1; i += 3) {
-      const f = frame(i);
-      turn += 2.4;
-      const outward = round(f, turn);
-      put(path[i], f.along.scale(0.55).add(outward.scale(0.8)).add(up.scale(-0.15)), outward.add(up.scale(0.6)));
     }
-    const f = frame(path.length - 1);
-    const fan = 2 + Math.floor(3 * Math.random());
-    for (let j = 0; j < fan; j++) {
-      const outward = round(f, turn + (6.28 * j) / fan);
-      put(path[path.length - 1], f.along.scale(0.8).add(outward.scale(0.6)), outward.add(up.scale(0.6)));
+  }
+
+  // A spray off the branch's side: a twig reaching out level or downward
+  // (never up over the way you roll), drooping a little to its end, a fan
+  // of leaves at its tip; and, `depth` times over, two smaller sprays
+  // forking from along it, the first to the side `way` (±1), the next to
+  // the other, never back towards the branch (`out` points away from it).
+  // Its leaves are `size` times a leaf's, `fan` to a tip. Adds its wood to
+  // `wood`, its leaves to `leaves`.
+  function spray(wood, leaves, base, dir, out, len, r, depth, way, size, fan) {
+    const path = curve([base, base.add(dir.scale(0.5 * len)).add(UP.scale(-0.015 * len)), base.add(dir.scale(len)).add(UP.scale(-0.06 * len))], 4);
+    wood.limb(path, (t) => r * (1 - 0.55 * t), false, 8);
+    const n = path.length - 1;
+    const along = (i) => path[Math.min(i + 1, n)].subtract(path[Math.max(i - 1, 0)]).normalize();
+    leafFan(leaves, path[n], along(n), out, size, fan);
+    if (!depth) return;
+    [0.42, 0.72].forEach((t, k) => {
+      const i = Math.round(t * n);
+      const to = k ? -way : way;
+      let child = turned(along(i), to * FORK);
+      const o = V3.Dot(child, out);
+      if (o < 0.15) child = child.add(out.scale(0.15 - o)).normalize();
+      spray(wood, leaves, path[i], child, out, FORK_SCALE * len, FORK_SCALE * r, depth - 1, -to, 0.8 * size, fan);
+    });
+  }
+
+  // A bough of a far limb's crown: it arcs out and up and, at its end,
+  // forks in two, `depth` times over; a ball of leaves at each last end.
+  // Adds its wood to `wood`, its leaves to `clumps`.
+  function fork(wood, clumps, base, dir, len, r, depth) {
+    const path = curve([base, base.add(dir.scale(0.5 * len)).add(UP.scale(0.04 * len)), base.add(dir.scale(len)).add(UP.scale(0.18 * len))], 4);
+    wood.limb(path, (t) => r * (1 - (1 - FORK_SCALE) * t), false, 10);
+    const end = path[path.length - 1];
+    if (!depth) {
+      leafClump(clumps, end.add(UP.scale(0.5)));
+      return;
     }
+    const along = end.subtract(path[path.length - 2]).normalize();
+    for (const to of [1, -1]) fork(wood, clumps, end, turned(along, to * FORK).add(UP.scale(0.2)).normalize(), FORK_SCALE * len, FORK_SCALE * r, depth - 1);
   }
 
   // A mode of the title page (royale.js plays it): built once, on the page's
@@ -342,7 +423,7 @@
       // limbs', which don't.
       const wood = (name, farFade) => {
         const m = new BABYLON.ShaderMaterial(name, scene, "wood", {
-          attributes: ["position", "normal", "uv"],
+          attributes: ["position", "normal", "uv", "color"],
           uniforms: ["world", "viewProjection", "eye", "farFade"],
           samplers: ["bark", "sky"],
         });
@@ -350,12 +431,14 @@
         m.setFloat("farFade", farFade);
         return m;
       };
+      const leafTex = new BABYLON.Texture("./assets/leaf.png", scene, false, false); // the right way up for the model's own UVs
       const leafy = (name, farFade) => {
         const m = new BABYLON.ShaderMaterial(name, scene, "leaf", {
-          attributes: ["position", "normal", "color"],
+          attributes: ["position", "normal", "uv", "color"],
           uniforms: ["world", "viewProjection", "eye", "farFade"],
-          samplers: ["sky"],
+          samplers: ["sky", "picture"],
         });
+        m.setTexture("picture", leafTex);
         m.backFaceCulling = false;
         m.setFloat("farFade", farFade);
         return m;
@@ -478,6 +561,7 @@
       const vd = new BABYLON.VertexData();
       vd.positions = leaf.getVerticesData("position");
       vd.normals = leaf.getVerticesData("normal");
+      vd.uvs = leaf.getVerticesData("uv"); // its place on its picture
       vd.colors = leaf.getVerticesData("color"); // its paint
       vd.indices = leaf.getIndices();
       this.leafData = vd;
@@ -550,6 +634,7 @@
       if (this.state !== "intro") this._startDrop();
       this.body.setEnabled(this.state !== "intro"); // the logo's apple, until it lands
       this.speed = SPEED_START;
+      this.built = 0; // how far the branch has been laid, from the start
       this.dist = 0; // how far you've rolled, the score
       this.s = 0; // …and how far along this straight
       this.y = 0; // the apple's feet above the branch
@@ -577,11 +662,14 @@
     // and boughs on the way, spaced by how fast you'll be going.
     _addSeg() {
       const prev = this.segs[this.segs.length - 1];
-      const speed = this.speed;
+      // As fast and as hard as it'll be when you get there.
+      const speed = speedAt(this.built);
+      const h = hardness(this.built);
+      const mix = ([easy, hard]) => easy + (hard - easy) * h;
       const seg = {
         p: prev ? prev.p.add(dirOf(prev.h).scale(prev.len)) : new V3(0, 0, 0),
         h: prev ? (prev.h + prev.turn + 4) % 4 : 0,
-        len: prev ? speed * (2.4 + 2.4 * Math.random()) : 45,
+        len: prev ? speed * (mix(STRAIGHT_MIN) + mix(STRAIGHT_MORE) * Math.random()) : 45,
         // Mostly the other way from the last corner, never the same way three
         // times, so the branch doesn't wind back onto itself.
         turn: !prev ? (Math.random() < 0.5 ? 1 : -1) : prev.turn === this.lastTurn || Math.random() < 0.65 ? -prev.turn : prev.turn,
@@ -591,12 +679,24 @@
       };
       if (prev) this.lastTurn = prev.turn;
       if (prev) {
-        let s = Math.max(12, speed);
-        while (s < seg.len - speed - GAP) {
-          if (Math.random() < 0.75) seg.obstacles.push({ type: Math.random() < 0.5 ? "gap" : "bough", s });
-          s += GAP + speed * (0.9 + 0.9 * Math.random());
+        const chance = mix(OBSTACLE_CHANCE) * Math.min(1, this.built / EASY_DIST);
+        const clear = speed * mix(CORNER_CLEAR);
+        const last = seg.len - clear - GAP; // the farthest along one can start
+        let s = Math.max(8, clear);
+        while (s < last) {
+          if (Math.random() < chance) {
+            const type = Math.random() < 0.5 ? "gap" : "bough";
+            seg.obstacles.push({ type, s });
+            // Duck, then jump at once.
+            if (type === "bough" && Math.random() < COMBO * h && s + speed * COMBO_AFTER < last) {
+              s += speed * COMBO_AFTER;
+              seg.obstacles.push({ type: "gap", s });
+            }
+          }
+          s += GAP + speed * mix(BETWEEN) * (0.7 + 0.6 * Math.random());
         }
       }
+      this.built += seg.len;
       this._buildSeg(seg);
       for (const old of [...this.segs, this.behind].filter(Boolean)) {
         old.limbs = old.limbs.filter((limb) => {
@@ -613,10 +713,7 @@
       const side = dirOf(seg.h + 1);
       const at = (s, y = 0, x = 0) => seg.p.add(d.scale(s)).add(side.scale(x)).add(new V3(0, y, 0));
       const R = BRANCH_R;
-      const add = (m) => {
-        m.material = this.bark;
-        seg.meshes.push(m);
-      };
+      const wood = new Wood(); // all of its own: the branch, its bend, sprays and boughs
       const leaves = [];
       // The wood between the gaps, from the end of the last bend to the start
       // of this one, and the bend: a quarter circle round onto the next
@@ -626,7 +723,7 @@
       for (const to of [...cuts, seg.len - BEND_R]) {
         const n = Math.max(2, Math.ceil((to - from) / 1.5));
         const path = Array.from({ length: n + 1 }, (_, i) => at(from + ((to - from) * i) / n, -R));
-        add(limbMesh("branch", path, () => R, this.scene, true));
+        wood.limb(path, () => R, true);
         from = to + GAP;
       }
       const next = dirOf(seg.h + seg.turn);
@@ -635,24 +732,23 @@
         const a = (i / 12) * (Math.PI / 2);
         return centre.add(next.scale(-BEND_R * Math.cos(a))).add(d.scale(BEND_R * Math.sin(a)));
       });
-      add(limbMesh("bend", bend, () => R, this.scene, true));
+      wood.limb(bend, () => R, true);
       seg.bend = { centre, d, next };
 
-      // Twigs off the sides, out and up or down, leafy along their outer half
-      // and at the tip; some clumps of leaves tucked under the branch's sides.
-      for (let s = 3 + 5 * Math.random(); s < seg.len - 3; s += 4 + 8 * Math.random()) {
+      // A few sprays off the sides (spray): one side then the other, evenly
+      // spaced, each swept on the way you're going, level or downward; of
+      // all sizes (the longer forking the more), their leaves bigger or
+      // smaller and one, three or five to a tip.
+      let k = Math.floor(4 * Math.random());
+      for (let s = 3 + 8 * Math.random(); s < seg.len - 3; s += 13, k++) {
         if (cuts.some((c) => s > c - 2 && s < c + GAP + 2)) continue;
-        const x = Math.random() < 0.5 ? -1 : 1;
-        if (Math.random() < 0.3) {
-          leafClump(leaves, at(s, -1.6 * R, x * 1.6 * R));
-          continue;
-        }
-        const reach = 3.5 + 4 * Math.random();
-        const lift = -2.5 + 4.5 * Math.random();
-        const end = at(s + (Math.random() - 0.5) * 4, lift - 0.5, x * (R + reach));
-        const path = curve([at(s, -0.9 * R, x * 0.6 * R), at(s + (Math.random() - 0.5) * 2, -0.6 * R + 0.4 * lift, x * (R + 0.5 * reach)), end]);
-        add(limbMesh("twig", path, (t) => 0.5 - 0.35 * t, this.scene));
-        leafSprig(leaves, path, side.scale(x));
+        const x = k % 2 ? 1 : -1;
+        const down = Math.random() < 0.5 ? 0 : 0.25 + 0.3 * Math.random();
+        const dir = side.scale(0.8 * x).add(d.scale(0.55)).add(UP.scale(-down)).normalize();
+        const len = 3 + 6 * Math.random();
+        const depth = len > 7 ? 2 : len > 4.5 ? 1 : 0;
+        const fan = [1, 3, 3, 5][Math.floor(4 * Math.random())];
+        spray(wood, leaves, at(s, -0.5 * R, x * 0.7 * R), dir, side.scale(x), len, 0.2 + 0.045 * len, depth, x, 0.7 + 0.6 * Math.random(), fan);
       }
 
       // A bough: a twig arching over the branch from one side, low enough that
@@ -666,51 +762,56 @@
           [R + 0.2, -0.9], [R + 0.5, 0.3], [R + 0.3, Y + 0.3], [0.6 * R, Y + 0.45],
           [0, Y + 0.42], [-0.6 * R, Y + 0.4], [-R - 0.6, Y + 0.15], [-R - 1.7, Y - 0.3],
         ].map(([px, py]) => at(o.s, py, x * px));
-        add(limbMesh("bough", curve(pts, 6), (t) => 0.45 - 0.25 * t, this.scene));
+        wood.limb(curve(pts, 6), (t) => 0.45 - 0.25 * t);
         leafClump(leaves, at(o.s, Y - 0.2, -x * (R + 2.6)));
       }
 
-      // Further off, great limbs of the tree climbing out of the chasm and
-      // across, leafy where they reach the light, each with a branch reaching
-      // across to this straight; only where they keep clear of the branch
-      // you're on (and _addSeg takes away any that a later straight would run
-      // into).
+      const own = wood.mesh("branch", this.scene);
+      own.material = this.bark;
+      seg.meshes.push(own);
+
+      // All round, near and far, great limbs of the tree climbing out of
+      // the chasm in one long lean (more of them nearer), each crowned where
+      // it reaches the light with three boughs (forking again, the nearer
+      // ones: fork), leafy at their ends; and the nearer ones with a branch
+      // reaching across to this straight. Only where they keep clear of the
+      // branch you're on (and _addSeg takes away any that a later straight
+      // would run into).
       seg.limbs = [];
-      for (let i = 0; i < 4; i++) {
+      for (let i = 0; i < LIMBS; i++) {
         const s = seg.len * Math.random();
-        const x = (Math.random() < 0.5 ? -1 : 1) * (22 + 40 * Math.random());
-        const top = 10 + 35 * Math.random();
-        const lean = (Math.random() - 0.5) * 50;
+        const far = Math.random() ** 2; // 0 near … 1 far
+        const x = (Math.random() < 0.5 ? -1 : 1) * (LIMB_NEAR + (LIMB_FAR - LIMB_NEAR) * far);
+        const top = 12 + 30 * Math.random();
+        const lean = (Math.random() < 0.5 ? 1 : -1) * (10 + 14 * Math.random());
         // From far enough down that, even seen from as far off as they're
         // built, their foot is well into the dark below.
-        const path = curve([at(s - 1.5 * lean, -350, x * 1.5), at(s - lean, -90, x * 1.3), at(s, -20, x), at(s + 0.4 * lean, top * 0.7, x * 0.9 + lean * 0.3), at(s + lean, top, x * 0.7 + lean)], 10);
-        const R0 = 4 + 4 * Math.random();
+        const path = curve([at(s - 1.6 * lean, -350, x * 1.25), at(s - 0.45 * lean, -90, x * 1.07), at(s, -20, x), at(s + 0.35 * lean, top, x * 0.93)], 10);
+        const R0 = 4 + 12 * Math.random() ** 1.5; // some of them giants
         const limb = { near: path.filter((q) => Math.abs(q.y) < 12), r: R0, meshes: [] };
         if ([...this.segs, seg].some((sg) => this._crosses(limb, sg))) continue;
-        const wood = limbMesh("limb", path, (t) => R0 * (1 - 0.65 * t), this.scene);
-        wood.material = this.limbBark;
+        const near = Math.abs(x) < LIMB_LINKED; // the far ones are drawn plainer
+        const limbWood = new Wood();
+        limbWood.limb(path, (t) => R0 * (1 - 0.65 * t), false, near ? 18 : 10);
         const clumps = [];
-        // sprigs round it up where it reaches the light
-        for (let k = 0; k < 10; k++) {
-          const p = path[Math.floor(path.length * (0.68 + 0.03 * k))] || path[path.length - 1];
-          const a = 6.28 * Math.random();
-          const out = 0.45 * R0 + 1;
-          leafClump(clumps, p.add(new V3(out * Math.cos(a), 0.5, out * Math.sin(a))));
+        const end = path[path.length - 1];
+        const axis = end.subtract(path[path.length - 2]).normalize();
+        const round = 2.4 * i; // which ways its three boughs go
+        for (let b = 0; b < 3; b++) {
+          const a = round + (2 * Math.PI * b) / 3;
+          const dir = axis.scale(0.62).add(new V3(0.78 * Math.cos(a), 0, 0.78 * Math.sin(a))).normalize();
+          fork(limbWood, clumps, end, dir, 3 * R0, 0.35 * R0, near ? 1 : 0);
         }
-        limb.meshes.push(wood, this._leaves(clumps, this.limbLeafMat));
-        const link = this._link(seg, at, path, R0);
+        const link = near && this._link(seg, at, path, R0);
         if (link && !this.segs.some((sg) => this._passes(link, 1 + BRANCH_R + 3, sg))) {
           const r0 = Math.min(2.4, 0.45 * R0);
-          const twig = limbMesh("link", link, (t) => 0.9 + (r0 - 0.9) * (1 - t) ** 1.6, this.scene);
-          twig.material = this.limbBark;
-          const linkLeaves = [];
-          for (const f of Math.random() < 0.5 ? [0.35] : [0.25, 0.5]) {
-            const q = link[Math.floor(link.length * f)];
-            leafClump(linkLeaves, q.add(new V3(0, 1.2, 0)));
-          }
-          limb.meshes.push(twig, this._leaves(linkLeaves, this.limbLeafMat));
+          limbWood.limb(link, (t) => 0.9 + (r0 - 0.9) * (1 - t) ** 1.6);
+          leafClump(clumps, link[Math.floor(link.length * 0.35)].add(new V3(0, 1.2, 0)));
           limb.link = link;
         }
+        const limbMesh = limbWood.mesh("limb", this.scene);
+        limbMesh.material = this.limbBark;
+        limb.meshes.push(limbMesh, this._leaves(clumps, this.limbLeafMat));
         seg.meshes.push(...limb.meshes);
         seg.limbs.push(limb);
       }
@@ -725,7 +826,7 @@
       this.leafData.applyToMesh(m);
       m.material = material;
       m.thinInstanceSetBuffer("matrix", new Float32Array(matrices), 16, true);
-      m.alwaysSelectAsActiveMesh = true;
+      m.thinInstanceRefreshBoundingInfo(); // round all its leaves, so it's left out when they're out of view
       m.isPickable = false;
       return m;
     }
@@ -751,8 +852,8 @@
     // below and climbs at a slant, as a real tree's boughs do, sagging a
     // little before it sweeps up to meet the straight from underneath. The
     // rest leave the limb a little below the straight's level and come
-    // across through a couple of random turns into its side, below its top
-    // (never rolled over). Null if there's nowhere for it to go.
+    // across in one shallow sweep into its side, below its top (never
+    // rolled over). Null if there's nowhere for it to go.
     _link(seg, at, limbPath, limbR) {
       const d = dirOf(seg.h);
       const side = dirOf(seg.h + 1);
@@ -780,13 +881,12 @@
       const R = BRANCH_R;
       const start = best.q;
       const end = at(s, -R, x * 0.3 * R); // inside the straight, hidden
-      const wander = (k) => new V3((Math.random() - 0.5) * k, 0, (Math.random() - 0.5) * k);
       if (rising) {
-        const mid = V3.Lerp(start, end, 0.5).add(wander(8)).add(new V3(0, -3, 0));
+        const mid = V3.Lerp(start, end, 0.5).add(new V3(0, -3, 0));
         return curve([start, mid, at(s, -R - 3.5, x * (R + 3)), end], 8);
       }
-      const p1 = V3.Lerp(start, end, 0.35).add(wander(10)).add(new V3(0, -3 + 5 * Math.random(), 0));
-      const p2 = V3.Lerp(start, end, 0.7).add(wander(5));
+      const p1 = V3.Lerp(start, end, 0.35).add(new V3(0, -1.5, 0));
+      const p2 = V3.Lerp(start, end, 0.7);
       p2.y = Math.min(p2.y, -R - 1);
       return curve([start, p1, p2, at(s, -0.65 * R, x * (R + 2.5)), end], 8);
     }
@@ -830,7 +930,7 @@
 
     _roll(dt) {
       const seg = this.segs[0];
-      this.speed = Math.min(SPEED_MAX, this.speed + SPEED_UP * dt);
+      this.speed = speedAt(this.dist);
       const step = this.speed * dt;
       this.s += step;
       this.dist += step;

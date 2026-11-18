@@ -89,7 +89,7 @@
   // Loose leaves on the wind, from just in front of the camera to behind
   // the bucket, up to the middle of the trees' canopies, each blowing right
   // across the view at its distance and round again out of sight.
-  const LEAVES_PER = 0.7; // to a unit of that depth, in the strongest wind (fewer in less, none in none)
+  const LEAVES_PER = 0.35; // to a unit of that depth, in the strongest wind (fewer in less, none in none)
   const LEAVES_NEAR = 4; // the nearest, in front of the camera
   const LEAVES_FAR = 44; // the farthest (z)
   const LEAVES_PAST = 1.5; // how far past the view's edge one turns back (more than its own length)
