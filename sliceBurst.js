@@ -125,6 +125,12 @@
       burstRoot.setEnabled(true);
       burstRoot.isVisible = true;
       burstRoot.position.copyFrom(center);
+      // The skin in the apple's colour (common.js).
+      if (options.colour) {
+        for (const m of burstRoot.getChildMeshes(false)) {
+          if (m.material && /applered/.test(m.material.name)) m.material = appleSkin(m.material, options.colour);
+        }
+      }
       const meshes = this._selectBurstMeshes(burstRoot);
 
       const lifetimeMs = options.lifetimeMs ?? 2200;

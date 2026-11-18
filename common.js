@@ -5,6 +5,8 @@
 //   makeScene, addLights         a scene on the page's engine, lit as the others
 //   flatMaterial, blobShadow     plain colour; the shadow under an apple
 //   loadFaces, Face              the face pictures; one apple's face, swapped
+//   APPLE_COLOURS, appleColour,  the colours an apple comes in; yours;
+//   appleSkin, paintApple        a skin in one of them; a model given one
 //   DROP_FROM, DropIn            a new apple dropping onto its spot (Toss, Run)
 //   Clouds                       clouds drifting across a band of sky
 //   Fader                        one scene's picture fading away over the next
@@ -111,6 +113,45 @@ class Face {
     if (this.mat.albedoTexture !== undefined) this.mat.albedoTexture = tex;
     else this.mat.diffuseTexture = tex;
   }
+}
+
+// ─── Colours ─────────────────────────────────────────────────────────
+// The colours an apple comes in, each its body's: you choose yours on the
+// title (royale.js), and Apple Ninja tosses them all. The first is the
+// model's own red.
+
+const APPLE_COLOURS = [
+  null,
+  [0.42, 0.0, 0.03], // deep red
+  [0.9, 0.2, 0.02], // orange red
+  [0.9, 0.6, 0.04], // yellow
+  [0.33, 0.58, 0.05], // green
+];
+const COLOUR_KEY = "appleRoyale.colour";
+
+// The one you've chosen (its place in APPLE_COLOURS).
+function appleColour() {
+  const i = +store.get(COLOUR_KEY, 0);
+  return APPLE_COLOURS[i] ? i : 0;
+}
+
+// A model's red skin in colour i: itself for red (or a colour we don't
+// have), else a copy, made once.
+function appleSkin(red, i) {
+  if (!APPLE_COLOURS[i]) return red;
+  const made = (red.painted = red.painted || []);
+  if (!made[i]) {
+    made[i] = red.clone(`${red.name}_${i}`);
+    made[i].albedoColor = BABYLON.Color3.FromArray(APPLE_COLOURS[i]);
+  }
+  return made[i];
+}
+
+// An apple model (under `node`) given colour i.
+function paintApple(node, i) {
+  const body = node.getChildMeshes(false).find((m) => /body$/.test(m.name));
+  body.red = body.red || body.material;
+  body.material = appleSkin(body.red, i);
 }
 
 // ─── Dropping in ─────────────────────────────────────────────────────

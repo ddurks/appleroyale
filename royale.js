@@ -61,7 +61,7 @@ const SOLO_OUT = [0.35, 0.9]; // a solo game's picture fades from over the sky b
 const INTERP_STEPS = 4;
 // The server's message format (its engine.ts PROTOCOL): checked along with
 // the rules, so a page that speaks an older one is told to reload.
-const NET_PROTOCOL = 3;
+const NET_PROTOCOL = 4;
 // A snapshot's `me` (our apple in full) lists these, in the server's order.
 const ME_FIELDS = [
   "alive", "x", "y", "vx", "vy", "grounded", "coyote", "jumpBuffer", "jumpWindup",
@@ -350,6 +350,12 @@ class AppleView {
     this.prevSquish = a.squish;
   }
 
+  // In its colour (the game's _colourOf): yours, or online whoever's it is.
+  paint() {
+    this.colour = this.game._colourOf(this.index);
+    paintApple(this.root, this.colour);
+  }
+
   attachModel(container) {
     const inst = container.instantiateModelsToScene(
       (n) => `a${this.index}_${n}`,
@@ -364,6 +370,7 @@ class AppleView {
     for (const m of this.root.getChildMeshes(false)) m.renderingGroupId = 2;
     // Each apple gets its own face material so expressions don't sync up.
     this.faceSwap = new Face(this.root, this.game.faceTextures, `face${this.index}`);
+    this.paint();
 
     for (const ag of inst.animationGroups) {
       ag.stop();
@@ -535,6 +542,7 @@ class AppleView {
     if (burst) {
       burst.burst({
         center: pos,
+        colour: this.colour,
         lifetimeMs: 2500,
         radialMin: 0.7,
         radialMax: 2.0,
@@ -805,7 +813,7 @@ class Game {
       const el = e.target.closest("[data-act]");
       if (!el || this.state !== "title") return;
       const act = el.dataset.act;
-      if (act === "toss" || act === "run") this._playSolo(act, el);
+      if (act === "toss" || act === "run" || act === "ninja") this._playSolo(act, el);
       else this._play(act === "online");
     });
     // The bots, in the title's multiplayer section.
@@ -833,6 +841,13 @@ class Game {
     // Tilt, if it was on last time (iOS is asked again when a game of Royale
     // is started: _play).
     if (store.get(TILT_KEY) && isTouch()) this._applyTilt(true);
+
+    // Your apple's colour: the arrows either side of the logo's apple.
+    this.colour = appleColour();
+    document.getElementById("picks").addEventListener("click", (e) => {
+      const el = e.target.closest("[data-step]");
+      if (el && this.state === "title") this._setColour(this.colour + +el.dataset.step);
+    });
 
     // Your name: top right, editable any time; shown under your apple.
     this.playerName = store.get(NAME_KEY, "");
@@ -1081,6 +1096,7 @@ class Game {
   _play(online) {
     this.input.sample(); // drop taps made on the title
     document.body.classList.add("royale");
+    if (this.iconColour !== this.colour) this._initActionIcon(); // the action button's apple, in your new colour
     // Tilting: the tap that got here is iOS's leave to ask for it.
     if (this.input.tilt) askTilt().then((ok) => ok || this._applyTilt(false));
     const fromY = this.camera.position.y;
@@ -1096,7 +1112,7 @@ class Game {
     this._beginDescent(fromY);
   }
 
-  // Apple Toss or Apple Run (`kind`), from the title's button `btn`: built
+  // Apple Toss, Apple Run or Apple Ninja (`kind`), from the title's button `btn`: built
   // the first time (the logo idles on meanwhile), then the logo's apple
   // falls into it as the title's sky fades away.
   async _playSolo(kind, btn) {
@@ -1105,7 +1121,7 @@ class Game {
     if (!this.solos[kind]) {
       this.soloLoading = true;
       btn.classList.add("busy");
-      const Mode = kind === "toss" ? Toss : Run;
+      const Mode = { toss: Toss, run: Run, ninja: Ninja }[kind];
       this.solos[kind] = await Mode.create(this.engine, this.engine.getRenderingCanvas());
       btn.classList.remove("busy");
       this.soloLoading = false;
@@ -1127,7 +1143,7 @@ class Game {
     const solo = this.solo;
     solo.leave();
     this.solo = null;
-    document.body.classList.remove("solo", "solo-toss", "solo-run");
+    document.body.classList.remove("solo", "solo-toss", "solo-run", "solo-ninja");
     this._beginAscent(undefined, solo);
   }
 
@@ -1228,6 +1244,7 @@ class Game {
     });
 
     this.logo = new Logo(scene, this.camera, titleWords, this.appleContainer, this.faceTextures, () => this._logoBand());
+    paintApple(this.logo.apple.node, this.colour);
     this.trophy = new Trophy(this, titleWords);
     this._buildCrown();
     // Clouds over the treetop (the title, and the fall from it): the view's
@@ -1379,6 +1396,7 @@ class Game {
       this._placeCrown(); // the view's size may have changed
       this.clouds.update(dt);
       this.logo.update(dt);
+      this._placePicks();
       this._fadeLogoIn(dt);
       return;
     }
@@ -1531,7 +1549,7 @@ class Game {
       humans: 0,
       acc: 0,
     };
-    this.online.net = new AppleNet(name, {
+    this.online.net = new AppleNet(name, this.colour, {
       onHello: (rules) => {
         if (rules !== this.online.rules) this._goOffline("This page is out of date — reload it to play online.");
       },
@@ -1598,6 +1616,8 @@ class Game {
       // Sent with a match's first snapshot and when they change.
       o.names = s.n;
       o.humans = s.n.filter((n) => n).length;
+      o.colours = s.c;
+      for (const v of this.views) v.paint();
     }
     o.lobbyLeft = s.lt;
     for (const e of s.ev || []) {
@@ -1791,8 +1811,10 @@ class Game {
   // pictures. The action button's apple squashes, stretches and idles in 2D
   // (_updateActionIcon). Only made when the touch bar is showing.
   async _initActionIcon() {
-    const canvas = document.getElementById("actionCanvas");
-    if (!canvas || !document.getElementById("touch").offsetHeight) return;
+    this.iconColour = this.colour;
+    if (!document.getElementById("touch").offsetHeight) return;
+    // Its canvas is taken away once the pictures are made; made again for another colour (_play).
+    const canvas = document.getElementById("actionCanvas") || document.getElementById("action").appendChild(Object.assign(document.createElement("canvas"), { id: "actionCanvas" }));
     const engine = new BABYLON.Engine(canvas, true, { alpha: true, premultipliedAlpha: false });
     const scene = new BABYLON.Scene(engine);
     scene.clearColor = new BABYLON.Color4(0, 0, 0, 0);
@@ -1801,6 +1823,7 @@ class Game {
 
     const container = await BABYLON.SceneLoader.LoadAssetContainerAsync("./assets/", "apple.glb", scene);
     const inst = container.instantiateModelsToScene((n) => `icon_${n}`, false);
+    paintApple(inst.rootNodes[0], this.colour);
     const parts = inst.rootNodes[0].getChildMeshes(false);
     for (const m of parts) if (/face|eyeball/.test(m.name)) m.setEnabled(false);
     const idle = inst.animationGroups.find((g) => g.name.toLowerCase().includes("idle"));
@@ -1970,6 +1993,33 @@ class Game {
     el.style.top = `${leafMidY - (this.stemArt.top - this.leafArt.cy) * px}px`;
     el.style.backgroundImage = `url(${this.stemArt.url})`;
     el.style.display = "block";
+  }
+
+  // Your apple in colour i (round the end of APPLE_COLOURS), from now on.
+  _setColour(i) {
+    this.colour = (i + APPLE_COLOURS.length) % APPLE_COLOURS.length;
+    store.set(COLOUR_KEY, this.colour);
+    paintApple(this.logo.apple.node, this.colour);
+  }
+
+  // Apple i's colour: yours your own; online, each player's (bots red).
+  _colourOf(i) {
+    if (i === this.humanIdx) return this.colour;
+    return (this.online && this.online.colours && this.online.colours[i]) || 0;
+  }
+
+  // The colour arrows, either side of the logo's apple.
+  _placePicks() {
+    const cam = this.camera;
+    const a = this.logo.apple;
+    const box = this.engine.getRenderingCanvas().getBoundingClientRect();
+    const perPx = (cam.orthoTop - cam.orthoBottom) / box.height;
+    const k = a.node.scaling.y;
+    const x = box.width / 2 + (a.node.position.x - cam.position.x) / perPx;
+    const y = (cam.position.y + cam.orthoTop - a.node.position.y - k * a.mid) / perPx;
+    const out = (k * a.w) / 2 / perPx + 36;
+    const css = `--pick-x: ${x.toFixed(1)}px; --pick-y: ${y.toFixed(1)}px; --pick-out: ${out.toFixed(1)}px`;
+    if (css !== this.picksCss) document.getElementById("picks").style.cssText = this.picksCss = css;
   }
 
   _setPlayerName(raw) {

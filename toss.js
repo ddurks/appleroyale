@@ -393,6 +393,7 @@
     // stump.
     enter(band) {
       this.active = true;
+      paintApple(this.holder, appleColour());
       this.state = "intro";
       this._setDist(this.distIdx);
       this.clouds.scatter();
@@ -989,6 +990,7 @@
       this.holder.setEnabled(false);
       this.sliceBurst.burst({
         center: this.pos,
+        colour: appleColour(),
         lifetimeMs: 4000,
         radialMin: 0.5,
         radialMax: 1.6,

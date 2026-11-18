@@ -164,6 +164,37 @@
         display: flex;
         visibility: hidden;
       }
+      /* Your apple's colour: an arrow either side of the logo's apple, placed
+         by royale.js (_placePicks: the apple's middle, and how far out). */
+      #picks button {
+        display: none;
+        position: absolute;
+        left: calc(var(--pick-x) - var(--pick-out) - 22px);
+        top: calc(var(--pick-y) - 22px);
+        width: 44px;
+        height: 44px;
+        font: inherit;
+        font-size: 30px;
+        line-height: 1;
+        color: #fff;
+        background: rgba(0, 0, 0, 0.4);
+        border: 0;
+        border-radius: 50%;
+        padding: 0;
+        cursor: pointer;
+        animation: picksIn 0.7s ease-out both;
+      }
+      #picks button + button {
+        left: calc(var(--pick-x) + var(--pick-out) - 22px);
+      }
+      body.titlescreen #picks button {
+        display: block;
+      }
+      @keyframes picksIn {
+        from {
+          opacity: 0;
+        }
+      }
       @keyframes titleIn {
         from {
           opacity: 0;
@@ -220,7 +251,7 @@
       #title .caption ~ .caption {
         margin-top: 6px; /* the second section, a little apart */
       }
-      /* Single player: as Royale's buttons (one line, as tall as their two),
+      /* Single player: as Royale's buttons (the small line first),
          in leaf green. */
       #title .solo button {
         height: var(--menu-h);
@@ -235,8 +266,8 @@
       #title .solo button.busy {
         opacity: 0.6; /* loading, the first time */
       }
-      /* The solo games (toss.js, run.js), played on this page: their score
-         top right, Toss's wind and distance, Run's message; Royale's own
+      /* The solo games (toss.js, run.js, ninja.js), played on this page: their
+         score top right, Toss's wind and distance, Run's and Ninja's message; Royale's own
          things hidden meanwhile. */
       #soloHud,
       #wind,
@@ -249,7 +280,8 @@
       }
       body.solo #soloHud,
       body.solo-toss #wind,
-      body.solo-run #msg {
+      body.solo-run #msg,
+      body.solo-ninja #msg {
         display: block;
       }
       body.solo-toss #dist {
@@ -268,6 +300,7 @@
         top: 14px;
         right: 14px;
         font-size: clamp(18px, 5vw, 26px);
+        text-align: right; /* Ninja's second line, under the score's end */
       }
       /* Toss, down from the top, clear of where the apple flies: the distances,
          then Menu and the score, then the wind. */
@@ -465,9 +498,14 @@
       </div>
       <p class="caption">Single player</p>
       <div class="play solo">
-        <button data-act="toss">Apple Toss</button>
-        <button data-act="run">Apple Run</button>
+        <button data-act="toss"><small>Apple</small>Toss</button>
+        <button data-act="run"><small>Apple</small>Run</button>
+        <button data-act="ninja"><small>Apple</small>Ninja</button>
       </div>
+    </div>
+    <div id="picks">
+      <button data-step="-1" aria-label="Previous apple colour">&lt;</button>
+      <button data-step="1" aria-label="Next apple colour">&gt;</button>
     </div>
     <div id="soloHud"></div>
     <div id="wind"></div>
@@ -562,6 +600,7 @@
     <script src="bots.js"></script>
     <script src="toss.js"></script>
     <script src="run.js"></script>
+    <script src="ninja.js"></script>
     <script src="royale.js"></script>
   </body>
 </html>

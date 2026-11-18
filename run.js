@@ -474,6 +474,7 @@
     // branch.
     enter(band) {
       this.active = true;
+      paintApple(this.body, appleColour());
       this.state = "intro";
       this._restart();
       this.intro.start(band);
@@ -1041,7 +1042,7 @@
     // sliceBurst's measure) and the way `dir` points, or outwards all round.
     _burst(p, upMin, upMax, dir) {
       this.body.setEnabled(false);
-      this.sliceBurst.burst({ center: p, lifetimeMs: 2500, radialMin: 0.7, radialMax: 2.0, upMin, upMax, planarDir: dir, planarJitter: 0.9, gravity: -GRAVITY });
+      this.sliceBurst.burst({ center: p, colour: appleColour(), lifetimeMs: 2500, radialMin: 0.7, radialMax: 2.0, upMin, upMax, planarDir: dir, planarJitter: 0.9, gravity: -GRAVITY });
     }
 
     _tumble(dt) {

@@ -230,6 +230,7 @@ class Intro extends Overlay {
   start(band) {
     this.band = band;
     this.fit();
+    paintApple(this.logo.apple.node, appleColour());
     this.logo.show(true);
     this.logo.update(0);
     this.logo.idle && this.logo.idle.stop();

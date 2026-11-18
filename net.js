@@ -1,7 +1,7 @@
 // Online play: a WebSocket to the Apple Royale world (drawvidverse
 // worldserver, games/appleroyale). Speaks its protocol:
-//   → auth, join, q (queue for a lobby), go (start now), i (one step's input),
-//     n (rename)
+//   → auth, join, c (your apple's colour), q (queue for a lobby), go (start
+//     now), i (one step's input), n (rename)
 //   ← welcome, hi (the server's rules fingerprint), s (snapshot, 30/s)
 // Snapshots come and inputs go as binary, in drawvidverse's shared format
 // (wire.js, copied from there by its tools/scripts/copy-wire.sh); the
@@ -32,8 +32,9 @@
 
   class Net {
     // handlers: onHello(rules), onSnapshot(s), onClose(reason)
-    constructor(name, handlers) {
+    constructor(name, colour, handlers) {
       this.h = handlers;
+      this.colour = colour;
       this.closed = false;
       this.ws = new WebSocket(serverUrl());
       this.ws.binaryType = "arraybuffer";
@@ -64,6 +65,7 @@
           if (m.wire.v !== DrawvidWire.VERSION) return this.close("This page is out of date — reload it to play online.");
           this.codec = DrawvidWire.compile(m.wire.schema);
         }
+        this._send({ t: "c", c: this.colour });
         this._send({ t: "q" });
       }
       else if (m.t === "hi") this.h.onHello(m.rules);

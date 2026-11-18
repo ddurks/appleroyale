@@ -31,7 +31,7 @@ down too.
 One page, `index.html`, with one engine and one title. `royale.js` is Apple
 Royale, the main game (with `core.js`, `net.js`, `bots.js`), and owns the
 page: the title, the render loop, and the switch into and out of the solo
-games, `toss.js` (`Toss`) and `run.js` (`Run`). Each solo game is a scene
+games, `toss.js` (`Toss`), `run.js` (`Run`) and `ninja.js` (`Ninja`). Each solo game is a scene
 of its own, built on the page's engine the first time it's chosen, and only
 drawn while it's being played. (`toss.html` and `run.html` just send you to
 the title.) What they share:
@@ -84,8 +84,7 @@ goes on — stay in frame to stay alive. The top of the screen is a ceiling
   fading away as a round begins to show the inside, whose leaves darken
   the deeper in they are. Its leafy wall repeats on up for ever.
 - The platforms are the tree's bark (`RoyaleBranch`).
-- **Menu** is the red button at the top left (on Apple Toss and Apple Run
-  too).
+- **Menu** is the red button at the top left (in the solo games too).
 - Win and you get the trophy in the middle of the screen, in place of any
   words: a golden apple on a low block of wood with gold plaques engraved
   "apple royale", turning in a gold glow under the title's "apple royale"
@@ -99,8 +98,8 @@ goes on — stay in frame to stay alive. The top of the screen is a ceiling
   the game, the bot lab and the multiplayer server. `royale.js` feeds it
   inputs and draws it.
 - The title screen: Royale's **Local** (vs bots; **Enter**) or **Online**
-  (vs players; **O**), then the two solo games, local only, as plainer
-  buttons (**Apple Toss**, **Apple Run**; the first time, they load). Bot difficulty **Easy / Normal / Hard** (keys **1–3**) and, on touch
+  (vs players; **O**), then the three solo games, local only, in green
+  (**Apple Toss**, **Apple Run**, **Apple Ninja**; the first time, they load). The arrows either side of the logo's apple change your apple's colour (`APPLE_COLOURS` in `common.js`): remembered, yours in every game, and seen by the others online. Bot difficulty **Easy / Normal / Hard** (keys **1–3**) and, on touch
   screens, controls **Buttons / Tilt**; both remembered. **Menu** (or
   **Esc**) in a lobby goes back. The 3D title is `assets/title.glb`, built
   from the font by `tools/title_glb.py` (see its header). The bots run
@@ -168,6 +167,24 @@ loads: sky through the gaps above, grass far below. The wood and
 leaves fade into it with distance, sooner the deeper they are. It opens on the logo, the apple falling from
 it onto the branch (`logo.js` Intro); each apple after drops onto the
 branch stretched and squashes as it lands.
+
+## Apple Ninja
+
+`ninja.js` (**Apple Ninja** on the title screen): apples are tossed up
+against the sky, Fruit Ninja style; swipe across them to slice them in two.
+Each one sliced is a point, and three or more in one go are a combo worth as
+many again. Let three fall, or slice a bomb, and the game's over. The waves
+get bigger and closer together, and bombs more likely, the further you get
+(the numbers are at the top of `ninja.js`).
+
+The apples are `apple.glb` baked to plain triangles, standing still, with the
+body's colour painted on for each variety (`VARIETIES`). A slice cuts those
+triangles along the blade's line through the apple's middle, closes the
+body's cut with a flat face, and sends the halves apart, turning their cut
+faces to you. The bomb is `assets/bomb.glb` (from `tools/bomb/bomb.blend`):
+the ball's middle at the origin, 0.85 in radius like the apple's body. A
+mesh with "spark" in its name flickers; nothing else about it is assumed, so
+another model exported over it just works.
 
 ## Online
 
